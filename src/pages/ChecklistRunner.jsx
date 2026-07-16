@@ -1,0 +1,214 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { AlertTriangle, Camera, X } from "lucide-react";
+import YesNoToggle from "../components/YesNoToggle";
+import { getReport, updateReport } from "../lib/reportsApi";
+import { readImageFileCompressed } from "../lib/fileUtils";
+
+export default function ChecklistRunner() {
+  const { id, step } = useParams();
+  const navigate = useNavigate();
+  const stepIndex = Number(step) || 0;
+
+  const [report, setReport] = useState(null);
+  const [items, setItems] = useState([]);
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      const r = await getReport(id);
+      setReport(r);
+      setItems(r?.sections?.[stepIndex]?.items ?? []);
+      setRemark(r?.additionalRemark ?? "");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, stepIndex]);
+
+  function updateItem(itemId, patch) {
+    setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, ...patch } : it)));
+  }
+
+  async function handlePhotoChange(itemId, e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await readImageFileCompressed(file);
+      updateItem(itemId, { photo: compressed });
+    } catch (err) {
+      alert(`Gagal muat naik gambar: ${err.message}`);
+    } finally {
+      e.target.value = "";
+    }
+  }
+
+  const totalSteps = report?.sections?.length ?? 0;
+  const isLastStep = stepIndex === totalSteps - 1;
+  const currentSection = report?.sections?.[stepIndex];
+
+  async function persist(nextStatus) {
+    if (!id || !report) return null;
+    setSaving(true);
+    try {
+      const nextSections = report.sections.map((s, idx) => (idx === stepIndex ? { ...s, items } : s));
+      const payload = { sections: nextSections, status: nextStatus ?? report.status ?? "draft" };
+      if (isLastStep) payload.additionalRemark = remark;
+      await updateReport(id, payload);
+      setReport((prev) => ({ ...prev, ...payload }));
+      return nextSections;
+    } catch (err) {
+      console.error("Failed to save checklist:", err);
+      alert(`Gagal simpan checklist: ${err.message}`);
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleNext() {
+    const saved = await persist("in_review");
+    if (!saved) return;
+    if (isLastStep) {
+      navigate(`/review/${id}`);
+    } else {
+      navigate(`/checklist/${id}/${stepIndex + 1}`);
+    }
+  }
+
+  if (!report || !currentSection) {
+    return <p className="py-10 text-center text-muted">Loading checklist…</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          {report.serviceProvider?.logo && (
+            <img
+              src={report.serviceProvider.logo}
+              alt="Service provider logo"
+              className="h-10 w-10 shrink-0 rounded object-contain"
+            />
+          )}
+          <div>
+            <p className="text-xs font-semibold uppercase text-muted">Service Provider</p>
+            <p className="font-bold text-ink">{report.serviceProvider?.name ?? "-"}</p>
+            <p className="text-sm text-muted">{report.serviceProvider?.address ?? ""}</p>
+          </div>
+        </div>
+
+        <div className="my-3 border-t border-border" />
+
+        <div className="flex items-start gap-3">
+          {report.customer?.logo && (
+            <img
+              src={report.customer.logo}
+              alt="Customer logo"
+              className="h-10 w-10 shrink-0 rounded object-contain"
+            />
+          )}
+          <div>
+            <p className="text-xs font-semibold uppercase text-muted">Customer</p>
+            <p className="font-bold text-ink">{report.customer?.name ?? "-"}</p>
+            <p className="text-sm text-muted">{report.customer?.address ?? ""}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-surface p-3 text-sm">
+          <div>
+            <p className="text-xs text-muted">Date of Service</p>
+            <p className="font-semibold">{report.dateOfService ?? "-"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted">Location Door</p>
+            <p className="font-semibold">{report.locationDoor ?? "-"}</p>
+          </div>
+        </div>
+      </section>
+
+      <div className="flex items-center justify-between rounded-lg bg-navy-800 px-4 py-3 text-white">
+        <span className="text-sm font-extrabold uppercase tracking-wide">{currentSection.sectionName}</span>
+        <span className="text-xs font-semibold opacity-80">
+          Step {stepIndex + 1} of {totalSteps}
+        </span>
+      </div>
+
+      {items.map((item, idx) => (
+        <section key={item.id} className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <div className="mb-3 flex gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface text-xs font-bold text-navy-800">
+              {idx + 1}
+            </span>
+            <p className="font-semibold text-ink">{item.question}</p>
+          </div>
+          <YesNoToggle value={item.answer} onChange={(v) => updateItem(item.id, { answer: v })} />
+          <input
+            value={item.remark}
+            onChange={(e) => updateItem(item.id, { remark: e.target.value })}
+            placeholder="Add remark..."
+            className="mt-3 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
+          />
+
+          {item.photo ? (
+            <div className="mt-3 flex items-center gap-3">
+              <img
+                src={item.photo}
+                alt="Attached evidence"
+                className="h-20 w-20 rounded-md border border-border object-cover"
+              />
+              <button
+                onClick={() => updateItem(item.id, { photo: null })}
+                className="flex items-center gap-1 rounded-md border border-danger-600 px-3 py-1.5 text-xs font-semibold text-danger-600 hover:bg-danger-100"
+              >
+                <X size={13} /> Remove Photo
+              </button>
+            </div>
+          ) : (
+            <label className="mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface">
+              <Camera size={16} /> Add Photo
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handlePhotoChange(item.id, e)}
+                className="hidden"
+              />
+            </label>
+          )}
+        </section>
+      ))}
+
+      {isLastStep && (
+        <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <p className="mb-2 font-semibold text-ink">Additional Remark:</p>
+          <textarea
+            value={remark}
+            onChange={(e) => setRemark(e.target.value)}
+            placeholder="Enter any general observations..."
+            rows={3}
+            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
+          />
+        </section>
+      )}
+
+      <button
+        onClick={() => persist(report.status)}
+        disabled={saving}
+        className="w-full rounded-md bg-navy-800 py-3 text-sm font-bold uppercase tracking-wide text-white hover:bg-navy-700 disabled:opacity-60"
+      >
+        {saving ? "Saving…" : "Save Progress"}
+      </button>
+      <button
+        onClick={handleNext}
+        disabled={saving}
+        className="w-full rounded-md border-2 border-navy-800 py-3 text-sm font-bold uppercase tracking-wide text-navy-800 hover:bg-navy-50 disabled:opacity-60"
+      >
+        {isLastStep ? "Next: Review & Sign-off" : `Next: ${report.sections[stepIndex + 1]?.sectionName}`}
+      </button>
+
+      <div className="fixed bottom-20 right-4 rounded-full bg-danger-600 p-3 text-white shadow-lg md:bottom-6">
+        <AlertTriangle size={20} />
+      </div>
+    </div>
+  );
+}
