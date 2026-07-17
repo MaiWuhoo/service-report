@@ -8,7 +8,9 @@ import Customers from "./pages/Customers";
 import AddCustomer from "./pages/AddCustomer";
 import ReviewSignoff from "./pages/ReviewSignoff";
 import CustomerSign from "./pages/CustomerSign";
+import CustomerSignBatch from "./pages/CustomerSignBatch";
 import ScheduleMaintenance from "./pages/ScheduleMaintenance";
+import FullCalendar from "./pages/FullCalendar";
 import AddChecklist from "./pages/AddChecklist";
 import Reports from "./pages/Reports";
 import HistoryPage from "./pages/HistoryPage";
@@ -22,6 +24,7 @@ export default function App() {
             sidebar, header menu, or bottom nav is rendered. Customers only ever
             see this one report. */}
         <Route path="/sign/:id" element={<CustomerSign />} />
+        <Route path="/sign-batch/:ids" element={<CustomerSignBatch />} />
 
         <Route element={<Layout />}>
           <Route path="/" element={<Portal />} />
@@ -29,8 +32,13 @@ export default function App() {
           <Route path="/checklist/:id/:step" element={<ChecklistRunner />} />
           <Route path="/review/:id" element={<ReviewSignoff />} />
           <Route path="/schedule" element={<ScheduleMaintenance />} />
+          <Route path="/schedule/:id/edit" element={<ScheduleMaintenance />} />
+          <Route path="/calendar" element={<FullCalendar />} />
           <Route path="/checklist-templates/new" element={<AddChecklist />} />
-          <Route path="/checklist-templates/:id/edit" element={<AddChecklist />} />
+          <Route
+            path="/checklist-templates/:id/edit"
+            element={<AddChecklist />}
+          />
           <Route path="/customers" element={<Customers />} />
           <Route path="/customers/new" element={<AddCustomer />} />
           <Route path="/customers/:id/edit" element={<AddCustomer />} />

@@ -8,6 +8,8 @@ import {
   Plus,
   CalendarPlus,
   Trash2,
+  Share2,
+  Pencil,
 } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import {
@@ -22,6 +24,7 @@ import {
 import { createReportFromTemplate } from "../lib/createReportFromTemplate";
 import { reportResumeUrl } from "../lib/reportResumeUrl";
 import { DEFAULT_TEMPLATE } from "../lib/defaultTemplates";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 export default function Portal() {
   const navigate = useNavigate();
@@ -29,6 +32,9 @@ export default function Portal() {
   const [templateId, setTemplateId] = useState(DEFAULT_TEMPLATE.id);
   const [locationDoor, setLocationDoor] = useState("");
   const [technician, setTechnician] = useState("");
+  const [dateOfService, setDateOfService] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
   const [customers, setCustomers] = useState([]);
   const [customerId, setCustomerId] = useState("");
   const [recentReports, setRecentReports] = useState([]);
@@ -57,6 +63,7 @@ export default function Portal() {
         locationDoor: entry.location,
         leadTechnician: entry.assignedTechnician,
         customerId: entry.customerId || undefined,
+        dateOfService: entry.startDate,
         scheduleId: entry.id,
       });
       await updateScheduleEntry(entry.id, {
@@ -114,11 +121,17 @@ export default function Portal() {
       setTechnician(t.assignedTechnician);
   }
 
-  async function handleDeleteReport(e, report) {
+  const [confirmDeleteReport, setConfirmDeleteReport] = useState(null);
+
+  function handleDeleteReport(e, report) {
     e.stopPropagation();
-    if (report.status !== "draft") return;
-    const ok = window.confirm(`Padam laporan draf ${report.reportId}?`);
-    if (!ok) return;
+    setConfirmDeleteReport(report);
+  }
+
+  async function performDeleteReport() {
+    const report = confirmDeleteReport;
+    if (!report) return;
+    setConfirmDeleteReport(null);
     setDeletingId(report.id);
     try {
       await deleteReport(report.id);
@@ -131,6 +144,20 @@ export default function Portal() {
     }
   }
 
+  const [copiedShareId, setCopiedShareId] = useState(null);
+
+  async function handleShareReport(e, report) {
+    e.stopPropagation();
+    const url = `${window.location.origin}/sign/${report.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedShareId(report.id);
+      setTimeout(() => setCopiedShareId(null), 2000);
+    } catch {
+      window.prompt("Copy this link:", url);
+    }
+  }
+
   async function handleNewReport() {
     setCreating(true);
     try {
@@ -138,6 +165,7 @@ export default function Portal() {
         locationDoor,
         leadTechnician: technician,
         customerId: customerId || undefined,
+        dateOfService,
       });
       navigate(`/checklist/${id}/0`);
     } catch (err) {
@@ -161,7 +189,7 @@ export default function Portal() {
         </p>
 
         <div className="mt-5 rounded-lg border border-border bg-surface p-4">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-[1.6fr_1fr_1fr]">
             <div>
               <label className="mb-1 block text-xs font-semibold text-ink">
                 Checklist Template
@@ -227,7 +255,7 @@ export default function Portal() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto_auto] md:items-end">
+          <div className="mt-4 grid gap-4 md:grid-cols-[1fr_1fr_auto_auto] md:items-end">
             <div>
               <label className="mb-1 block text-xs font-semibold text-ink">
                 Lead Technician
@@ -236,6 +264,17 @@ export default function Portal() {
                 value={technician}
                 onChange={(e) => setTechnician(e.target.value)}
                 placeholder="Enter full name"
+                className="w-full rounded-md border border-border bg-white px-3 py-2.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-ink">
+                Date of Service
+              </label>
+              <input
+                type="date"
+                value={dateOfService}
+                onChange={(e) => setDateOfService(e.target.value)}
                 className="w-full rounded-md border border-border bg-white px-3 py-2.5 text-sm"
               />
             </div>
@@ -328,15 +367,29 @@ export default function Portal() {
                     <StatusBadge status={r.status} />
                   </td>
                   <td className="px-5 py-3.5 text-right">
-                    {r.status === "draft" && (
+                    <div className="flex justify-end gap-1.5">
+                      <button
+                        onClick={(e) => handleShareReport(e, r)}
+                        aria-label="Copy customer sign-off link"
+                        title="Copy customer sign-off link"
+                        className="rounded-md border border-navy-800 p-1.5 text-navy-800 hover:bg-navy-50"
+                      >
+                        <Share2 size={15} />
+                      </button>
                       <button
                         onClick={(e) => handleDeleteReport(e, r)}
                         disabled={deletingId === r.id}
-                        aria-label="Delete draft report"
+                        aria-label="Delete report"
+                        title="Delete report"
                         className="rounded-md border border-danger-600 p-1.5 text-danger-600 hover:bg-danger-100 disabled:opacity-60"
                       >
                         <Trash2 size={15} />
                       </button>
+                    </div>
+                    {copiedShareId === r.id && (
+                      <p className="mt-1 text-[11px] font-semibold text-teal-600">
+                        Link copied ✓
+                      </p>
                     )}
                   </td>
                 </tr>
@@ -352,7 +405,10 @@ export default function Portal() {
           <h3 className="flex items-center gap-2 text-base font-bold text-navy-800">
             <CalendarDays size={18} /> Maintenance Schedule
           </h3>
-          <button className="text-sm font-semibold text-navy-700 hover:underline">
+          <button
+            onClick={() => navigate("/calendar")}
+            className="text-sm font-semibold text-navy-700 hover:underline"
+          >
             Full Calendar
           </button>
         </div>
@@ -391,6 +447,17 @@ export default function Portal() {
                 )}
               </div>
               <StatusBadge status={s.reportId ? s.status : "upcoming"} />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/schedule/${s.id}/edit`);
+                }}
+                aria-label="Edit schedule"
+                title="Edit schedule"
+                className="rounded-md border border-navy-800 p-1.5 text-navy-800 hover:bg-navy-50"
+              >
+                <Pencil size={14} />
+              </button>
               {openingScheduleId === s.id ? (
                 <span className="text-xs font-semibold text-navy-700">
                   Opening…
@@ -410,9 +477,10 @@ export default function Portal() {
             <Info size={16} /> Service Protocol
           </h4>
           <p className="mt-2 text-sm text-muted">
-            Ensure all diagnostic tests for biometric sensors and electromagnetic locks are
-            documented with photographic evidence for critical faults. Failure to record
-            software versions will result in report rejection.
+            Ensure all diagnostic tests for biometric sensors and
+            electromagnetic locks are documented with photographic evidence for
+            critical faults. Failure to record software versions will result in
+            report rejection.
           </p>
         </section>
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -420,13 +488,28 @@ export default function Portal() {
             <Headset size={16} /> Support &amp; Guidance
           </h4>
           <div className="mt-2 flex items-center justify-between gap-3">
-            <p className="text-sm text-muted">Technician assistance available 24/7 via the internal channel.</p>
+            <p className="text-sm text-muted">
+              Technician assistance available 24/7 via the internal channel.
+            </p>
             <button className="shrink-0 rounded-md border border-navy-800 px-3 py-2 text-xs font-bold text-navy-800 hover:bg-navy-50">
               Open Wiki
             </button>
           </div>
         </section>
       </div> */}
+
+      <ConfirmDialog
+        open={Boolean(confirmDeleteReport)}
+        title={`Padam laporan ${confirmDeleteReport?.reportId ?? ""}?`}
+        message={
+          confirmDeleteReport?.status === "verified"
+            ? "Laporan ni dah Verified — padam tetap boleh, tapi tak boleh diundur."
+            : "Tindakan ini tidak boleh diundur."
+        }
+        confirmLabel="Padam"
+        onConfirm={performDeleteReport}
+        onCancel={() => setConfirmDeleteReport(null)}
+      />
     </div>
   );
 }

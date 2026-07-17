@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Pencil, Trash2, Building2 } from "lucide-react";
 import { listCustomers, deleteCustomer } from "../lib/reportsApi";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 export default function Customers() {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState(null);
+  const [confirmDeleteCustomer, setConfirmDeleteCustomer] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -21,11 +23,10 @@ export default function Customers() {
     })();
   }, []);
 
-  async function handleDelete(c) {
-    const ok = window.confirm(
-      `Padam customer "${c.name}"? Template yang dah guna customer ni takkan terjejas (data disnapshot dalam laporan sedia ada).`
-    );
-    if (!ok) return;
+  async function performDelete() {
+    const c = confirmDeleteCustomer;
+    if (!c) return;
+    setConfirmDeleteCustomer(null);
     setDeletingId(c.id);
     try {
       await deleteCustomer(c.id);
@@ -44,8 +45,8 @@ export default function Customers() {
         <div>
           <h2 className="text-2xl font-extrabold text-ink">Customers</h2>
           <p className="text-sm text-muted">
-            Manage customer records once — pick them from a dropdown when building checklist
-            templates.
+            Manage customer records once — pick them from a dropdown when
+            building checklist templates.
           </p>
         </div>
         <button
@@ -65,7 +66,10 @@ export default function Customers() {
 
       <div className="space-y-3">
         {customers.map((c) => (
-          <section key={c.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <section
+            key={c.id}
+            className="rounded-xl border border-border bg-card p-4 shadow-sm"
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
                 {c.logo ? (
@@ -93,7 +97,7 @@ export default function Customers() {
                   <Pencil size={15} />
                 </button>
                 <button
-                  onClick={() => handleDelete(c)}
+                  onClick={() => setConfirmDeleteCustomer(c)}
                   disabled={deletingId === c.id}
                   aria-label="Delete customer"
                   className="rounded-md border border-danger-600 p-2 text-danger-600 hover:bg-danger-100 disabled:opacity-60"
@@ -105,6 +109,15 @@ export default function Customers() {
           </section>
         ))}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(confirmDeleteCustomer)}
+        title={`Padam customer "${confirmDeleteCustomer?.name ?? ""}"?`}
+        message="Laporan yang dah guna customer ni takkan terjejas (data disnapshot dalam laporan sedia ada)."
+        confirmLabel="Padam"
+        onConfirm={performDelete}
+        onCancel={() => setConfirmDeleteCustomer(null)}
+      />
     </div>
   );
 }
