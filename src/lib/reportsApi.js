@@ -76,6 +76,12 @@ export async function listUpcomingSchedule() {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+export async function listAllSchedule() {
+  const q = query(scheduleCol, orderBy("startDate", "asc"), limit(500));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
 export async function getScheduleEntry(id) {
   const snap = await getDoc(doc(db, "maintenanceSchedule", id));
   if (!snap.exists()) return null;
@@ -84,6 +90,10 @@ export async function getScheduleEntry(id) {
 
 export async function updateScheduleEntry(id, data) {
   await updateDoc(doc(db, "maintenanceSchedule", id), data);
+}
+
+export async function deleteScheduleEntry(id) {
+  await deleteDoc(doc(db, "maintenanceSchedule", id));
 }
 
 export async function createScheduleEntry(data) {
@@ -150,6 +160,15 @@ export async function updateChecklistTemplate(id, data) {
 
 export async function deleteChecklistTemplate(id) {
   await deleteDoc(doc(db, "checklistTemplates", id));
+}
+
+export async function duplicateChecklistTemplate(sourceTemplate) {
+  const { id, createdAt, ...rest } = sourceTemplate;
+  const newId = await createChecklistTemplate({
+    ...rest,
+    name: `${sourceTemplate.name} (Copy)`,
+  });
+  return newId;
 }
 
 export async function createChecklistTemplate(data) {

@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
-import { createScheduleEntry, listChecklistTemplates, listCustomers } from "../lib/reportsApi";
+import { useNavigate, useParams } from "react-router-dom";
+import { ChevronLeft, ChevronRight, CalendarDays, Trash2 } from "lucide-react";
+import {
+  createScheduleEntry,
+  updateScheduleEntry,
+  deleteScheduleEntry,
+  getScheduleEntry,
+  listChecklistTemplates,
+  listCustomers,
+} from "../lib/reportsApi";
 import { DEFAULT_TEMPLATE } from "../lib/defaultTemplates";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -30,9 +38,21 @@ function dayCount(start, end) {
   return Math.round(ms / (1000 * 60 * 60 * 24)) + 1;
 }
 
+/** Builds a local-time Date from a YYYY-MM-DD string without any timezone
+ *  shift (new Date("2026-07-27") parses as UTC and can land on the wrong
+ *  local day). */
+function parseDateStr(str) {
+  if (!str) return null;
+  const [y, m, d] = str.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export default function ScheduleMaintenance() {
   const navigate = useNavigate();
-  const [step, setStep] = useState(1);
+  const { id } = useParams();
+  const isEditing = Boolean(id);
+
+  const [step, setStep] = useState(isEditing ? 2 : 1);
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
@@ -41,11 +61,16 @@ export default function ScheduleMaintenance() {
   const [rangeStart, setRangeStart] = useState(today);
   const [rangeEnd, setRangeEnd] = useState(null);
 
-  const [maintenanceName, setMaintenanceName] = useState("Quarterly Access Door Service");
+  const [maintenanceName, setMaintenanceName] = useState(
+    "Quarterly Access Door Service",
+  );
   const [technician, setTechnician] = useState("");
   const [locationDoor, setLocationDoor] = useState("");
   const [priority, setPriority] = useState("Medium");
   const [confirming, setConfirming] = useState(false);
+  const [loadingEntry, setLoadingEntry] = useState(isEditing);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const [templates, setTemplates] = useState([DEFAULT_TEMPLATE]);
   const [templateId, setTemplateId] = useState(DEFAULT_TEMPLATE.id);
@@ -65,8 +90,28 @@ export default function ScheduleMaintenance() {
       } catch {
         // Firestore not reachable yet
       }
+
+      if (isEditing) {
+        const entry = await getScheduleEntry(id);
+        if (entry) {
+          setMaintenanceName(entry.title ?? "Quarterly Access Door Service");
+          setLocationDoor(entry.location ?? "");
+          setTechnician(entry.assignedTechnician ?? "");
+          setPriority(entry.priority ?? "Medium");
+          setTemplateId(entry.templateId ?? DEFAULT_TEMPLATE.id);
+          setCustomerId(entry.customerId ?? "");
+          const start = parseDateStr(entry.startDate) ?? today;
+          const end = parseDateStr(entry.endDate);
+          setRangeStart(start);
+          setRangeEnd(end && end.getTime() !== start.getTime() ? end : null);
+          setViewYear(start.getFullYear());
+          setViewMonth(start.getMonth());
+        }
+        setLoadingEntry(false);
+      }
     })();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const cells = buildMonthGrid(viewYear, viewMonth);
   const monthLabel = new Date(viewYear, viewMonth).toLocaleString("en-US", {
@@ -77,8 +122,14 @@ export default function ScheduleMaintenance() {
   function changeMonth(delta) {
     let m = viewMonth + delta;
     let y = viewYear;
-    if (m < 0) { m = 11; y -= 1; }
-    if (m > 11) { m = 0; y += 1; }
+    if (m < 0) {
+      m = 11;
+      y -= 1;
+    }
+    if (m > 11) {
+      m = 0;
+      y += 1;
+    }
     setViewMonth(m);
     setViewYear(y);
   }
@@ -116,18 +167,23 @@ export default function ScheduleMaintenance() {
   }
 
   const effectiveEnd = rangeEnd ?? rangeStart;
-  const totalDays = rangeStart ? dayCount(rangeStart, new Date(effectiveEnd)) : 0;
+  const totalDays = rangeStart
+    ? dayCount(rangeStart, new Date(effectiveEnd))
+    : 0;
 
   async function confirmSchedule() {
     setConfirming(true);
     try {
-      const template = templates.find((t) => t.id === templateId) ?? DEFAULT_TEMPLATE;
-      await createScheduleEntry({
+      const template =
+        templates.find((t) => t.id === templateId) ?? DEFAULT_TEMPLATE;
+      const payload = {
         title: maintenanceName,
         location: locationDoor,
         startDate: rangeStart.toISOString().slice(0, 10),
         endDate: effectiveEnd.toISOString().slice(0, 10),
-        monthLabel: rangeStart.toLocaleString("en-US", { month: "short" }).toUpperCase(),
+        monthLabel: rangeStart
+          .toLocaleString("en-US", { month: "short" })
+          .toUpperCase(),
         dayLabel: rangeStart.getDate(),
         durationDays: totalDays,
         assignedTechnician: technician,
@@ -135,24 +191,52 @@ export default function ScheduleMaintenance() {
         templateId: template.id,
         templateName: template.name,
         customerId: customerId || null,
-        status: "upcoming",
-      });
+      };
+
+      if (isEditing) {
+        await updateScheduleEntry(id, payload);
+      } else {
+        await createScheduleEntry({ ...payload, status: "upcoming" });
+      }
       navigate("/");
     } catch (err) {
-      console.error("Failed to schedule maintenance:", err);
-      alert(`Gagal jadualkan maintenance: ${err.message}`);
+      console.error("Failed to save schedule:", err);
+      alert(`Gagal simpan jadual: ${err.message}`);
     } finally {
       setConfirming(false);
     }
+  }
+
+  async function performCancelSchedule() {
+    setConfirmCancel(false);
+    setCancelling(true);
+    try {
+      await deleteScheduleEntry(id);
+      navigate("/");
+    } catch (err) {
+      console.error("Failed to cancel schedule:", err);
+      alert(`Gagal cancel jadual: ${err.message}`);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  if (loadingEntry) {
+    return <p className="py-10 text-center text-muted">Loading…</p>;
   }
 
   if (step === 1) {
     return (
       <div className="space-y-5">
         <div>
-          <h2 className="text-2xl font-extrabold text-ink">Select Maintenance Date Range</h2>
+          <h2 className="text-2xl font-extrabold text-ink">
+            {isEditing
+              ? "Edit Maintenance Date Range"
+              : "Select Maintenance Date Range"}
+          </h2>
           <p className="text-sm text-muted">
-            Tap a start date, then an end date to schedule a multi-day inspection window.
+            Tap a start date, then an end date to schedule a multi-day
+            inspection window.
           </p>
         </div>
 
@@ -160,17 +244,25 @@ export default function ScheduleMaintenance() {
           <div className="mb-3 flex items-center justify-between">
             <p className="font-bold text-ink">{monthLabel}</p>
             <div className="flex gap-2">
-              <button onClick={() => changeMonth(-1)} className="rounded p-1 hover:bg-surface">
+              <button
+                onClick={() => changeMonth(-1)}
+                className="rounded p-1 hover:bg-surface"
+              >
                 <ChevronLeft size={20} />
               </button>
-              <button onClick={() => changeMonth(1)} className="rounded p-1 hover:bg-surface">
+              <button
+                onClick={() => changeMonth(1)}
+                className="rounded p-1 hover:bg-surface"
+              >
                 <ChevronRight size={20} />
               </button>
             </div>
           </div>
           <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-muted">
             {WEEKDAYS.map((w, i) => (
-              <div key={i} className="py-1">{w}</div>
+              <div key={i} className="py-1">
+                {w}
+              </div>
             ))}
           </div>
           <div className="grid grid-cols-7 gap-1 text-center text-sm">
@@ -179,7 +271,9 @@ export default function ScheduleMaintenance() {
               const inRange = isInRange(d);
               const endpoint = isEndpoint(d);
               const isToday =
-                today.getDate() === d && today.getMonth() === viewMonth && today.getFullYear() === viewYear;
+                today.getDate() === d &&
+                today.getMonth() === viewMonth &&
+                today.getFullYear() === viewYear;
               return (
                 <button
                   key={i}
@@ -188,10 +282,10 @@ export default function ScheduleMaintenance() {
                     endpoint
                       ? "bg-navy-800 text-white"
                       : inRange
-                      ? "bg-navy-50 text-navy-800"
-                      : isToday
-                      ? "border border-navy-800"
-                      : "hover:bg-surface"
+                        ? "bg-navy-50 text-navy-800"
+                        : isToday
+                          ? "border border-navy-800"
+                          : "hover:bg-surface"
                   }`}
                 >
                   {d}
@@ -206,13 +300,17 @@ export default function ScheduleMaintenance() {
             <CalendarDays size={18} />
           </span>
           <div>
-            <p className="text-xs font-semibold uppercase text-muted">Selected Date Range</p>
+            <p className="text-xs font-semibold uppercase text-muted">
+              Selected Date Range
+            </p>
             <p className="font-bold text-ink">
               {rangeStart ? fmt(rangeStart) : "-"}
               {rangeEnd ? ` \u2013 ${fmt(rangeEnd)}` : ""}
             </p>
             {rangeStart && (
-              <p className="text-xs text-muted">{totalDays} day{totalDays > 1 ? "s" : ""}</p>
+              <p className="text-xs text-muted">
+                {totalDays} day{totalDays > 1 ? "s" : ""}
+              </p>
             )}
           </div>
         </section>
@@ -239,12 +337,18 @@ export default function ScheduleMaintenance() {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-2xl font-extrabold text-ink">Maintenance Details</h2>
-        <p className="text-sm text-muted">Assign a technician and service type for the selected date range.</p>
+        <h2 className="text-2xl font-extrabold text-ink">
+          Maintenance Details
+        </h2>
+        <p className="text-sm text-muted">
+          Assign a technician and service type for the selected date range.
+        </p>
       </div>
 
       <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
-        <label className="mb-1 block text-xs font-bold uppercase text-muted">Maintenance Name</label>
+        <label className="mb-1 block text-xs font-bold uppercase text-muted">
+          Maintenance Name
+        </label>
         <select
           value={maintenanceName}
           onChange={(e) => setMaintenanceName(e.target.value)}
@@ -255,7 +359,9 @@ export default function ScheduleMaintenance() {
           <option>Fire Alarm Testing</option>
         </select>
 
-        <label className="mb-1 block text-xs font-bold uppercase text-muted">Location Door</label>
+        <label className="mb-1 block text-xs font-bold uppercase text-muted">
+          Location Door
+        </label>
         <input
           value={locationDoor}
           onChange={(e) => setLocationDoor(e.target.value)}
@@ -263,7 +369,9 @@ export default function ScheduleMaintenance() {
           className="mb-4 w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
         />
 
-        <label className="mb-1 block text-xs font-bold uppercase text-muted">Checklist Template</label>
+        <label className="mb-1 block text-xs font-bold uppercase text-muted">
+          Checklist Template
+        </label>
         <select
           value={templateId}
           onChange={(e) => setTemplateId(e.target.value)}
@@ -276,12 +384,15 @@ export default function ScheduleMaintenance() {
           ))}
         </select>
         <p className="mt-1 text-xs text-muted">
-          This determines which checklist opens when you tap this schedule entry later.
+          This determines which checklist opens when you tap this schedule entry
+          later.
         </p>
       </section>
 
       <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
-        <label className="mb-1 block text-xs font-bold uppercase text-muted">Customer</label>
+        <label className="mb-1 block text-xs font-bold uppercase text-muted">
+          Customer
+        </label>
         <select
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value)}
@@ -294,11 +405,15 @@ export default function ScheduleMaintenance() {
             </option>
           ))}
         </select>
-        <p className="mt-1 text-xs text-muted">Shown on the report generated from this schedule.</p>
+        <p className="mt-1 text-xs text-muted">
+          Shown on the report generated from this schedule.
+        </p>
       </section>
 
       <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
-        <label className="mb-1 block text-xs font-bold uppercase text-muted">Assigned Technician</label>
+        <label className="mb-1 block text-xs font-bold uppercase text-muted">
+          Assigned Technician
+        </label>
         <input
           value={technician}
           onChange={(e) => setTechnician(e.target.value)}
@@ -312,12 +427,16 @@ export default function ScheduleMaintenance() {
           <CalendarDays size={18} />
         </span>
         <div>
-          <p className="text-xs font-semibold uppercase text-muted">Selected Date Range</p>
+          <p className="text-xs font-semibold uppercase text-muted">
+            Selected Date Range
+          </p>
           <p className="font-bold text-ink">
             {fmt(rangeStart)}
             {rangeEnd ? ` \u2013 ${fmt(rangeEnd)}` : ""}
           </p>
-          <p className="text-xs text-muted">{totalDays} day{totalDays > 1 ? "s" : ""}</p>
+          <p className="text-xs text-muted">
+            {totalDays} day{totalDays > 1 ? "s" : ""}
+          </p>
         </div>
       </section>
 
@@ -326,16 +445,40 @@ export default function ScheduleMaintenance() {
           onClick={() => setStep(1)}
           className="rounded-md bg-surface py-3 text-sm font-bold text-ink hover:bg-border"
         >
-          Cancel
+          Back
         </button>
         <button
           onClick={confirmSchedule}
           disabled={confirming}
           className="rounded-md bg-navy-800 py-3 text-sm font-bold text-white hover:bg-navy-700 disabled:opacity-60"
         >
-          {confirming ? "Saving…" : "Confirm Schedule"}
+          {confirming
+            ? "Saving…"
+            : isEditing
+              ? "Save Changes"
+              : "Confirm Schedule"}
         </button>
       </div>
+
+      {isEditing && (
+        <button
+          onClick={() => setConfirmCancel(true)}
+          disabled={cancelling}
+          className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-danger-600 py-3 text-sm font-bold text-danger-600 hover:bg-danger-100 disabled:opacity-60"
+        >
+          <Trash2 size={16} />{" "}
+          {cancelling ? "Cancelling…" : "Cancel This Maintenance"}
+        </button>
+      )}
+
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancel this maintenance?"
+        message="This schedule entry will be removed. Any report already linked to it stays untouched."
+        confirmLabel="Cancel Maintenance"
+        onConfirm={performCancelSchedule}
+        onCancel={() => setConfirmCancel(false)}
+      />
     </div>
   );
 }
