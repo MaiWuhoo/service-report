@@ -49,6 +49,20 @@ function parseDateStr(str) {
   return new Date(y, m - 1, d);
 }
 
+function formatDateInput(date) {
+  if (!date) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseInputDate(value) {
+  if (!value) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export default function ScheduleMaintenance() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -66,6 +80,10 @@ export default function ScheduleMaintenance() {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
+
+  useEffect(() => {
+    setStep(isEditing ? 2 : 1);
+  }, [isEditing]);
 
   // Range selection state
   const [rangeStart, setRangeStart] = useState(today);
@@ -183,6 +201,12 @@ export default function ScheduleMaintenance() {
     year: "numeric",
   });
 
+  useEffect(() => {
+    if (!rangeStart) return;
+    setViewYear(rangeStart.getFullYear());
+    setViewMonth(rangeStart.getMonth());
+  }, [rangeStart]);
+
   function changeMonth(delta) {
     let m = viewMonth + delta;
     let y = viewYear;
@@ -256,8 +280,8 @@ export default function ScheduleMaintenance() {
       };
     }
 
-    const startKey = rangeStart.toISOString().slice(0, 10);
-    const endKey = (rangeEnd ?? rangeStart).toISOString().slice(0, 10);
+    const startKey = formatDateInput(rangeStart);
+    const endKey = formatDateInput(rangeEnd ?? rangeStart);
     const earlier = [];
     const later = [];
 
@@ -367,8 +391,8 @@ export default function ScheduleMaintenance() {
       const payload = {
         title: maintenanceName,
         location: locationDoor,
-        startDate: rangeStart.toISOString().slice(0, 10),
-        endDate: effectiveEnd.toISOString().slice(0, 10),
+        startDate: formatDateInput(rangeStart),
+        endDate: formatDateInput(effectiveEnd),
         monthLabel: rangeStart
           .toLocaleString("en-US", { month: "short" })
           .toUpperCase(),
@@ -554,23 +578,62 @@ export default function ScheduleMaintenance() {
           </div>
         </section>
 
-        <section className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-navy-800 text-white">
-            <CalendarDays size={18} />
-          </span>
-          <div>
-            <p className="text-xs font-semibold uppercase text-muted">
-              Selected Date Range
-            </p>
-            <p className="font-bold text-ink">
-              {rangeStart ? fmt(rangeStart) : "-"}
-              {rangeEnd ? ` \u2013 ${fmt(rangeEnd)}` : ""}
-            </p>
-            {rangeStart && (
-              <p className="text-xs text-muted">
-                {totalDays} day{totalDays > 1 ? "s" : ""}
+        <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold uppercase text-muted">
+                Start Date
+              </label>
+              <input
+                type="date"
+                value={formatDateInput(rangeStart)}
+                onChange={(e) => {
+                  const newDate = parseInputDate(e.target.value);
+                  if (!newDate) return;
+                  setRangeStart(newDate);
+                  if (!rangeEnd || newDate > rangeEnd) {
+                    setRangeEnd(newDate);
+                  }
+                }}
+                className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold uppercase text-muted">
+                End Date
+              </label>
+              <input
+                type="date"
+                value={formatDateInput(effectiveEnd)}
+                onChange={(e) => {
+                  const newDate = parseInputDate(e.target.value);
+                  if (!newDate) return;
+                  const nextStart = !rangeStart || newDate < rangeStart ? newDate : rangeStart;
+                  setRangeStart(nextStart);
+                  setRangeEnd(newDate);
+                }}
+                className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-navy-800 text-white">
+              <CalendarDays size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase text-muted">
+                Selected Date Range
               </p>
-            )}
+              <p className="font-bold text-ink">
+                {rangeStart ? fmt(rangeStart) : "-"}
+                {rangeEnd ? ` \u2013 ${fmt(rangeEnd)}` : ""}
+              </p>
+              {rangeStart && (
+                <p className="text-xs text-muted">
+                  {totalDays} day{totalDays > 1 ? "s" : ""}
+                </p>
+              )}
+            </div>
           </div>
         </section>
 
@@ -774,6 +837,46 @@ export default function ScheduleMaintenance() {
           placeholder="Ahmad Sulaiman"
           className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
         />
+      </section>
+
+      <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-bold uppercase text-muted">
+              Start Date
+            </label>
+            <input
+              type="date"
+              value={formatDateInput(rangeStart)}
+              onChange={(e) => {
+                const newDate = parseInputDate(e.target.value);
+                if (!newDate) return;
+                setRangeStart(newDate);
+                if (!rangeEnd || newDate > rangeEnd) {
+                  setRangeEnd(newDate);
+                }
+              }}
+              className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-bold uppercase text-muted">
+              End Date
+            </label>
+            <input
+              type="date"
+              value={formatDateInput(effectiveEnd)}
+              onChange={(e) => {
+                const newDate = parseInputDate(e.target.value);
+                if (!newDate) return;
+                const nextStart = !rangeStart || newDate < rangeStart ? newDate : rangeStart;
+                setRangeStart(nextStart);
+                setRangeEnd(newDate);
+              }}
+              className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
+            />
+          </div>
+        </div>
       </section>
 
       <section className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
