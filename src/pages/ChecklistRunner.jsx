@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Camera, X } from "lucide-react";
 import YesNoToggle from "../components/YesNoToggle";
-import { getReport, updateReport } from "../lib/reportsApi";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
 import { readImageFileCompressed } from "../lib/fileUtils";
 
 export default function ChecklistRunner() {
@@ -13,6 +13,7 @@ export default function ChecklistRunner() {
   const [report, setReport] = useState(null);
   const [items, setItems] = useState([]);
   const [remark, setRemark] = useState("");
+  const [dateOfService, setDateOfService] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -22,6 +23,7 @@ export default function ChecklistRunner() {
       setReport(r);
       setItems(r?.sections?.[stepIndex]?.items ?? []);
       setRemark(r?.additionalRemark ?? "");
+      setDateOfService(r?.dateOfService ?? "");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, stepIndex]);
@@ -52,10 +54,34 @@ export default function ChecklistRunner() {
     setSaving(true);
     try {
       const nextSections = report.sections.map((s, idx) => (idx === stepIndex ? { ...s, items } : s));
-      const payload = { sections: nextSections, status: nextStatus ?? report.status ?? "draft" };
+      const payload = {
+        sections: nextSections,
+        status: nextStatus ?? report.status ?? "draft",
+        dateOfService: dateOfService || report.dateOfService,
+      };
       if (isLastStep) payload.additionalRemark = remark;
       await updateReport(id, payload);
       setReport((prev) => ({ ...prev, ...payload }));
+
+      // Propagate status into schedule entry templateSelections so UI shows instance status.
+      try {
+        const scheduleId = report?.scheduleId;
+        if (scheduleId) {
+          const entry = await getScheduleEntry(scheduleId);
+          if (entry && Array.isArray(entry.templateSelections)) {
+            const updated = entry.templateSelections.map((s) =>
+              s.reportId === id || s.reportId === report.reportId ? { ...s, status: payload.status } : s,
+            );
+            const allVerified = updated.every((s) => s.status === "verified");
+            await updateScheduleEntry(scheduleId, {
+              templateSelections: updated,
+              status: allVerified ? "verified" : updated.some((s) => s.status) ? "in_progress" : entry.status,
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Failed to propagate report status to schedule:", err);
+      }
       return nextSections;
     } catch (err) {
       console.error("Failed to save checklist:", err);
@@ -117,8 +143,16 @@ export default function ChecklistRunner() {
 
         <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-surface p-3 text-sm">
           <div>
-            <p className="text-xs text-muted">Date of Service</p>
-            <p className="font-semibold">{report.dateOfService ?? "-"}</p>
+            <label className="text-xs text-muted" htmlFor="date-of-service">
+              Date of Service
+            </label>
+            <input
+              id="date-of-service"
+              type="date"
+              value={dateOfService}
+              onChange={(e) => setDateOfService(e.target.value)}
+              className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
+            />
           </div>
           <div>
             <p className="text-xs text-muted">Location Door</p>

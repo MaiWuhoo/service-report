@@ -9,6 +9,7 @@ export default function SettingsPage() {
   const [name, setName] = useState(DEFAULT_COMPANY.name);
   const [address, setAddress] = useState(DEFAULT_COMPANY.address);
   const [logo, setLogo] = useState(null);
+  const [companyStamp, setCompanyStamp] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -21,6 +22,7 @@ export default function SettingsPage() {
           setName(profile.name ?? DEFAULT_COMPANY.name);
           setAddress(profile.address ?? DEFAULT_COMPANY.address);
           setLogo(profile.logo ?? null);
+          setCompanyStamp(profile.companyStamp ?? null);
         }
       } catch {
         // Firestore not reachable yet — form still usable with defaults
@@ -41,11 +43,22 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleCompanyStampChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await readFileAsDataURL(file);
+      setCompanyStamp(dataUrl);
+    } catch (err) {
+      alert(`Gagal muat naik company stamp: ${err.message}`);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaved(false);
     try {
-      await saveCompanyProfile({ name, address, logo });
+      await saveCompanyProfile({ name, address, logo, companyStamp });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -109,6 +122,30 @@ export default function SettingsPage() {
                 <span className="text-sm font-semibold text-navy-700">Upload Logo</span>
                 <span className="text-xs text-muted">PNG or JPG</span>
                 <input type="file" accept="image/png,image/jpeg" onChange={handleLogoChange} className="hidden" />
+              </label>
+            )}
+
+            <label className="mb-1 mt-4 block text-sm font-semibold text-ink">Digital COP (Company Stamp)</label>
+            {companyStamp ? (
+              <div className="mb-4 flex items-center gap-3">
+                <img
+                  src={companyStamp}
+                  alt="Company stamp preview"
+                  className="h-16 w-40 rounded-md border border-border object-contain p-1"
+                />
+                <button
+                  onClick={() => setCompanyStamp(null)}
+                  className="flex items-center gap-1 rounded-md border border-danger-600 px-3 py-1.5 text-xs font-semibold text-danger-600 hover:bg-danger-100"
+                >
+                  <X size={13} /> Remove
+                </button>
+              </div>
+            ) : (
+              <label className="mb-4 flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed border-border py-6 text-center hover:bg-surface">
+                <ImagePlus size={20} className="mb-2 text-navy-700" />
+                <span className="text-sm font-semibold text-navy-700">Upload Company Stamp</span>
+                <span className="text-xs text-muted">PNG or JPG</span>
+                <input type="file" accept="image/png,image/jpeg" onChange={handleCompanyStampChange} className="hidden" />
               </label>
             )}
 

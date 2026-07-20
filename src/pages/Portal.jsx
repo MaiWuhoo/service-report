@@ -45,8 +45,15 @@ export default function Portal() {
   const [openingScheduleId, setOpeningScheduleId] = useState(null);
 
   async function handleScheduleClick(entry) {
+    // If this schedule entry has explicit templateSelections, show the list
+    // of form instances we created so the user can pick one.
     setOpeningScheduleId(entry.id);
     try {
+      if (entry.templateSelections && entry.templateSelections.length > 0) {
+        navigate(`/schedule/${entry.id}/open`);
+        return;
+      }
+
       // Already has a report linked — resume it instead of creating a new one.
       if (entry.reportId) {
         const existing = await getReport(entry.reportId);
@@ -56,9 +63,10 @@ export default function Portal() {
         }
       }
 
-      // No report yet — create one from the template attached to this schedule entry.
+      // No selections — fallback to the old single-template behavior.
+      const templateId = entry.templateIds?.[0] ?? entry.templateId;
       const template =
-        templates.find((t) => t.id === entry.templateId) ?? DEFAULT_TEMPLATE;
+        templates.find((t) => t.id === templateId) ?? DEFAULT_TEMPLATE;
       const newId = await createReportFromTemplate(template, {
         locationDoor: entry.location,
         leadTechnician: entry.assignedTechnician,
@@ -330,7 +338,7 @@ export default function Portal() {
           <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="bg-surface text-left text-xs font-semibold uppercase text-muted">
-                <th className="px-5 py-3">Report ID</th>
+                <th className="px-5 py-3">Project Name</th>
                 <th className="px-5 py-3">Date</th>
                 <th className="px-5 py-3">Location</th>
                 <th className="px-5 py-3">Technician</th>
@@ -359,7 +367,7 @@ export default function Portal() {
                   onClick={() => navigate(reportResumeUrl(r))}
                   className="cursor-pointer border-t border-border hover:bg-surface"
                 >
-                  <td className="px-5 py-3.5 font-medium">{r.reportId}</td>
+                  <td className="px-5 py-3.5 font-medium">{r.templateName}</td>
                   <td className="px-5 py-3.5">{r.dateOfService}</td>
                   <td className="px-5 py-3.5">{r.locationDoor}</td>
                   <td className="px-5 py-3.5">{r.leadTechnician}</td>

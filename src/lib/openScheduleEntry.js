@@ -14,7 +14,14 @@ export async function resolveScheduleEntryUrl(entry, templates = [DEFAULT_TEMPLA
     if (existing) return reportResumeUrl(existing);
   }
 
-  const template = templates.find((t) => t.id === entry.templateId) ?? DEFAULT_TEMPLATE;
+  // If the schedule entry defines multiple template selections, return
+  // the route that shows the list so the user can pick the desired form.
+  if (entry.templateSelections && entry.templateSelections.length > 0) {
+    return `/schedule/${entry.id}/open`;
+  }
+
+  const templateId = entry.templateIds?.[0] ?? entry.templateId;
+  const template = templates.find((t) => t.id === templateId) ?? DEFAULT_TEMPLATE;
   const newId = await createReportFromTemplate(template, {
     locationDoor: entry.location,
     leadTechnician: entry.assignedTechnician,
