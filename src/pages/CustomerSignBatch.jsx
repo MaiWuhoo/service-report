@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { CheckCircle2, MapPin } from "lucide-react";
+import { CheckCircle2, MapPin, ChevronDown, ChevronRight } from "lucide-react";
 import { getReport, updateReport } from "../lib/reportsApi";
 import SignaturePad from "../components/SignaturePad";
 
@@ -20,6 +20,7 @@ export default function CustomerSignBatch() {
   const [reports, setReports] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [customerName, setCustomerName] = useState("");
+  const [expandedSections, setExpandedSections] = useState([]);
   const canvasRef = useRef(null);
   const [submitting, setSubmitting] = useState(false);
   const [justSigned, setJustSigned] = useState(false);
@@ -68,6 +69,15 @@ export default function CustomerSignBatch() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function toggleSection(reportId, idx) {
+    const sectionKey = `${reportId}-${idx}`;
+    setExpandedSections((prev) =>
+      prev.includes(sectionKey)
+        ? prev.filter((key) => key !== sectionKey)
+        : [...prev, sectionKey],
+    );
   }
 
   if (notFound) {
@@ -133,30 +143,65 @@ export default function CustomerSignBatch() {
             <div className="divide-y divide-border">
               {(report.sections ?? []).map((s, idx) => {
                 const { checked, remarks } = sectionSummary(s);
+                const sectionKey = `${report.id}-${idx}`;
+                const isOpen = expandedSections.includes(sectionKey);
                 return (
-                  <div
-                    key={s.sectionName}
-                    className="flex items-center justify-between px-5 py-3"
-                  >
-                    <div>
-                      <p className="text-xs text-muted">
-                        {String(idx + 1).padStart(2, "0")}
-                      </p>
-                      <p className="text-sm font-semibold text-ink">
-                        {s.sectionName}
-                      </p>
-                      <p className="text-xs text-muted">
-                        {checked} Items Checked
-                      </p>
-                    </div>
-                    {remarks > 0 ? (
-                      <span className="text-xs font-semibold text-danger-600">
-                        ⓘ {remarks} Remark{remarks > 1 ? "s" : ""}
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-xs font-semibold text-teal-600">
-                        <CheckCircle2 size={13} /> All Pass
-                      </span>
+                  <div key={sectionKey} className="divide-y divide-border">
+                    <button
+                      type="button"
+                      onClick={() => toggleSection(report.id, idx)}
+                      aria-expanded={isOpen}
+                      className="group flex w-full items-center justify-between px-5 py-3 text-left cursor-pointer hover:bg-navy-50"
+                    >
+                      <div>
+                        <p className="text-xs text-muted">
+                          {String(idx + 1).padStart(2, "0")}
+                        </p>
+                        <p className="text-sm font-semibold text-ink">
+                          {s.sectionName}
+                        </p>
+                        <p className="text-xs text-muted">
+                          {checked} Items Checked
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {remarks > 0 ? (
+                          <span className="text-xs font-semibold text-danger-600">
+                            ⓘ {remarks} Remark{remarks > 1 ? "s" : ""}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs font-semibold text-teal-600">
+                            <CheckCircle2 size={13} /> All Pass
+                          </span>
+                        )}
+                        {isOpen ? (
+                          <ChevronDown size={16} className="text-navy-700" />
+                        ) : (
+                          <ChevronRight size={16} className="text-navy-700" />
+                        )}
+                      </div>
+                    </button>
+                    {isOpen && (
+                      <div className="bg-surface px-5 py-3 text-sm text-muted">
+                        {s.items?.map((item, itemIdx) => (
+                          <div
+                            key={item.id ?? `item-${sectionKey}-${itemIdx}`}
+                            className="mb-2 rounded-md border border-border bg-white p-3 shadow-sm last:mb-0"
+                          >
+                            <p className="font-semibold text-ink">
+                              {itemIdx + 1}. {item.question}
+                            </p>
+                            <p className="text-xs text-muted">
+                              Answer: {item.answer ?? "N/A"}
+                            </p>
+                            {item.remark ? (
+                              <p className="mt-1 text-xs text-danger-600">
+                                Remark: {item.remark}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 );

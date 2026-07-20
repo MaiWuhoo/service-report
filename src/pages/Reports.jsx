@@ -33,8 +33,8 @@ export default function Reports() {
   async function handleDelete(report) {
     const ok = window.confirm(
       report.status === "verified"
-        ? `Padam laporan ${report.reportId}? Laporan ni dah Verified — padam tetap boleh, tapi tak boleh diundur.`
-        : `Padam laporan ${report.reportId}? Tindakan ini tidak boleh diundur.`,
+        ? `Padam laporan ${report.templateName}? Laporan ni dah Verified — padam tetap boleh, tapi tak boleh diundur.`
+        : `Padam laporan ${report.templateName}? Tindakan ini tidak boleh diundur.`,
     );
     if (!ok) return;
     setDeletingId(report.id);
@@ -166,7 +166,7 @@ export default function Reports() {
                   selectMode ? toggleSelect(r.id) : navigate(reportResumeUrl(r))
                 }
               >
-                <p className="font-bold text-ink">{r.reportId}</p>
+                <p className="font-bold text-ink">{r.templateName}</p>
                 <p className="truncate text-sm text-muted">
                   {r.locationDoor} • {r.dateOfService} • {r.leadTechnician}
                 </p>

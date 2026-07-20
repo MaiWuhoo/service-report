@@ -343,11 +343,15 @@ export default function FullCalendar() {
                     days)
                   </p>
                 )}
-                {entry.templateName && (
+                {entry.templateNames?.length ? (
+                  <p className="text-xs text-muted">
+                    Checklist: {entry.templateNames.join(", ")}
+                  </p>
+                ) : entry.templateName ? (
                   <p className="text-xs text-muted">
                     Checklist: {entry.templateName}
                   </p>
-                )}
+                ) : null}
               </div>
               <StatusBadge
                 status={entry.reportId ? entry.status : "upcoming"}

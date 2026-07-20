@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, ChevronRight, MapPin, Upload, X, Share2 } from "lucide-react";
-import { getReport, updateReport, updateScheduleEntry } from "../lib/reportsApi";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
 import { generateServiceReportPDF } from "../lib/generateReport";
 import { readFileAsDataURL } from "../lib/fileUtils";
 import SignaturePad from "../components/SignaturePad";
@@ -89,7 +89,26 @@ export default function ReviewSignoff() {
     try {
       await updateReport(id, payload);
       if (report.scheduleId) {
-        await updateScheduleEntry(report.scheduleId, { status: "verified" });
+        try {
+          const entry = await getScheduleEntry(report.scheduleId);
+          if (entry?.templateSelections && Array.isArray(entry.templateSelections)) {
+            const updated = entry.templateSelections.map((s) =>
+              s.reportId === report.reportId || s.reportId === report.id
+                ? { ...s, status: "verified" }
+                : s,
+            );
+            const allVerified = updated.every((s) => s.status === "verified");
+            await updateScheduleEntry(report.scheduleId, {
+              templateSelections: updated,
+              status: allVerified ? "verified" : "in_progress",
+            });
+          } else {
+            // legacy single-report schedule
+            await updateScheduleEntry(report.scheduleId, { status: "verified" });
+          }
+        } catch (err) {
+          console.error("Failed to update schedule entry after verify:", err);
+        }
       }
       setReport((prev) => ({ ...prev, ...payload }));
       generateServiceReportPDF({ ...report, ...payload });

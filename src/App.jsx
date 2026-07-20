@@ -10,6 +10,7 @@ import ReviewSignoff from "./pages/ReviewSignoff";
 import CustomerSign from "./pages/CustomerSign";
 import CustomerSignBatch from "./pages/CustomerSignBatch";
 import ScheduleMaintenance from "./pages/ScheduleMaintenance";
+import ScheduleForms from "./pages/ScheduleForms";
 import FullCalendar from "./pages/FullCalendar";
 import AddChecklist from "./pages/AddChecklist";
 import Reports from "./pages/Reports";
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="/review/:id" element={<ReviewSignoff />} />
           <Route path="/schedule" element={<ScheduleMaintenance />} />
           <Route path="/schedule/:id/edit" element={<ScheduleMaintenance />} />
+          <Route path="/schedule/:id/open" element={<ScheduleForms />} />
           <Route path="/calendar" element={<FullCalendar />} />
           <Route path="/checklist-templates/new" element={<AddChecklist />} />
           <Route

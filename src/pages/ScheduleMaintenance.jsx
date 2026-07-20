@@ -8,6 +8,8 @@ import {
   getScheduleEntry,
   listChecklistTemplates,
   listCustomers,
+  listAllSchedule,
+  getCompanyProfile,
 } from "../lib/reportsApi";
 import { DEFAULT_TEMPLATE } from "../lib/defaultTemplates";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -52,6 +54,14 @@ export default function ScheduleMaintenance() {
   const { id } = useParams();
   const isEditing = Boolean(id);
 
+  function createSelection(templateId, location = "") {
+    return {
+      id: `${templateId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      templateId,
+      location,
+    };
+  }
+
   const [step, setStep] = useState(isEditing ? 2 : 1);
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
@@ -73,9 +83,14 @@ export default function ScheduleMaintenance() {
   const [cancelling, setCancelling] = useState(false);
 
   const [templates, setTemplates] = useState([DEFAULT_TEMPLATE]);
-  const [templateId, setTemplateId] = useState(DEFAULT_TEMPLATE.id);
+  const [templateSelections, setTemplateSelections] = useState([
+    createSelection(DEFAULT_TEMPLATE.id),
+  ]);
   const [customers, setCustomers] = useState([]);
   const [customerId, setCustomerId] = useState("");
+  const [existingSchedules, setExistingSchedules] = useState([]);
+  const [companyStamp, setCompanyStamp] = useState(null);
+  const [includeCompanyStamp, setIncludeCompanyStamp] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -98,8 +113,42 @@ export default function ScheduleMaintenance() {
           setLocationDoor(entry.location ?? "");
           setTechnician(entry.assignedTechnician ?? "");
           setPriority(entry.priority ?? "Medium");
-          setTemplateId(entry.templateId ?? DEFAULT_TEMPLATE.id);
+          setTemplateSelections(
+            (entry.templateSelections ??
+              (entry.templateIds
+                ? entry.templateIds.map((templateId) => ({
+                    id: `${templateId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    templateId,
+                    formCount: 1,
+                    location: entry.location ?? "",
+                  }))
+                : entry.templateId
+                ? [
+                    {
+                      id: `${entry.templateId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                      templateId: entry.templateId,
+                      formCount: 1,
+                      location: entry.location ?? "",
+                    },
+                  ]
+                : [
+                    {
+                      id: `${DEFAULT_TEMPLATE.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                      templateId: DEFAULT_TEMPLATE.id,
+                      formCount: 1,
+                      location: entry.location ?? "",
+                    },
+                  ]))
+              .map((sel) => ({
+                id: sel.id ?? createSelection(sel.templateId, sel.location ?? entry.location ?? "").id,
+                templateId: sel.templateId,
+                formCount: sel.formCount ?? 1,
+                location: sel.location ?? entry.location ?? "",
+              })),
+          );
           setCustomerId(entry.customerId ?? "");
+          setCompanyStamp(entry.companyStamp ?? null);
+          setIncludeCompanyStamp(Boolean(entry.companyStamp));
           const start = parseDateStr(entry.startDate) ?? today;
           const end = parseDateStr(entry.endDate);
           setRangeStart(start);
@@ -108,6 +157,21 @@ export default function ScheduleMaintenance() {
           setViewMonth(start.getMonth());
         }
         setLoadingEntry(false);
+      }
+      try {
+        const allSchedules = await listAllSchedule();
+        setExistingSchedules(allSchedules);
+      } catch {
+        // ignore schedule-loading failures
+      }
+
+      try {
+        const profile = await getCompanyProfile();
+        const stamp = profile?.companyStamp ?? null;
+        setCompanyStamp(stamp);
+        setIncludeCompanyStamp(Boolean(stamp));
+      } catch {
+        // ignore profile-loading failures
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -171,11 +235,135 @@ export default function ScheduleMaintenance() {
     ? dayCount(rangeStart, new Date(effectiveEnd))
     : 0;
 
+  const selectedTemplateIds = Array.from(
+    new Set(templateSelections.map((selection) => selection.templateId)),
+  );
+  const selectedTemplates = templates.filter((t) =>
+    selectedTemplateIds.includes(t.id),
+  );
+
+  function scheduleIsCurrent(entry) {
+    return isEditing && entry.id === id;
+  }
+
+  function getNearbySchedules() {
+    if (!rangeStart) {
+      return {
+        earlier: existingSchedules
+          .filter((entry) => !scheduleIsCurrent(entry))
+          .slice(0, 3),
+        later: [],
+      };
+    }
+
+    const startKey = rangeStart.toISOString().slice(0, 10);
+    const endKey = (rangeEnd ?? rangeStart).toISOString().slice(0, 10);
+    const earlier = [];
+    const later = [];
+
+    for (const entry of existingSchedules) {
+      if (scheduleIsCurrent(entry)) continue;
+      if (entry.endDate < startKey) {
+        earlier.push(entry);
+      } else if (entry.startDate > endKey) {
+        later.push(entry);
+      }
+    }
+
+    earlier.sort((a, b) => (a.startDate < b.startDate ? 1 : -1));
+    later.sort((a, b) => (a.startDate > b.startDate ? 1 : -1));
+
+    return {
+      earlier: earlier.slice(0, 3),
+      later: later.slice(0, 3),
+    };
+  }
+
+  function fmtScheduleEntry(entry) {
+    return `${entry.startDate} → ${entry.endDate}${entry.title ? ` · ${entry.title}` : ""}`;
+  }
+
+  function toggleTemplateSelection(templateId) {
+    setTemplateSelections((prev) =>
+      prev.some((selection) => selection.templateId === templateId)
+        ? prev.filter((selection) => selection.templateId !== templateId)
+        : [...prev, createSelection(templateId, locationDoor || "")],
+    );
+  }
+
+  function updateTemplateSelection(instanceId, patch) {
+    setTemplateSelections((prev) =>
+      prev.map((selection) =>
+        selection.id === instanceId ? { ...selection, ...patch } : selection,
+      ),
+    );
+  }
+
+  function setTemplateCount(templateId, count) {
+    setTemplateSelections((prev) => {
+      const normalizedCount = Math.max(1, count);
+      // Preserve overall order. Adjust only the group for the given templateId.
+      const result = [];
+      let group = [];
+      let sawTemplate = false;
+      for (const sel of prev) {
+        if (sel.templateId === templateId) {
+          group.push(sel);
+          sawTemplate = true;
+        } else {
+          if (group.length) {
+            if (group.length >= normalizedCount) {
+              result.push(...group.slice(0, normalizedCount));
+            } else {
+              result.push(...group);
+              const additions = Array.from({ length: normalizedCount - group.length }, () =>
+                createSelection(templateId, group[0]?.location || locationDoor || ""),
+              );
+              result.push(...additions);
+            }
+            group = [];
+          }
+          result.push(sel);
+        }
+      }
+
+      if (group.length) {
+        if (group.length >= normalizedCount) {
+          result.push(...group.slice(0, normalizedCount));
+        } else {
+          result.push(...group);
+          const additions = Array.from({ length: normalizedCount - group.length }, () =>
+            createSelection(templateId, group[0]?.location || locationDoor || ""),
+          );
+          result.push(...additions);
+        }
+      }
+
+      if (!sawTemplate) {
+        // template wasn't present before — add instances at the end
+        const additions = Array.from({ length: normalizedCount }, () =>
+          createSelection(templateId, locationDoor || ""),
+        );
+        result.push(...additions);
+      }
+
+      return result;
+    });
+  }
+
+  function removeTemplateInstance(instanceId) {
+    setTemplateSelections((prev) =>
+      prev.filter((selection) => selection.id !== instanceId),
+    );
+  }
+
   async function confirmSchedule() {
     setConfirming(true);
     try {
-      const template =
-        templates.find((t) => t.id === templateId) ?? DEFAULT_TEMPLATE;
+      const primaryTemplate =
+        selectedTemplates[0] ??
+        templates.find((t) => t.id === selectedTemplateIds[0]) ??
+        DEFAULT_TEMPLATE;
       const payload = {
         title: maintenanceName,
         location: locationDoor,
@@ -188,9 +376,19 @@ export default function ScheduleMaintenance() {
         durationDays: totalDays,
         assignedTechnician: technician,
         priority,
-        templateId: template.id,
-        templateName: template.name,
+        templateSelections: templateSelections,
+        templateIds:
+          selectedTemplateIds.length > 0
+            ? selectedTemplateIds
+            : [primaryTemplate.id],
+        templateNames:
+          selectedTemplates.length > 0
+            ? selectedTemplates.map((t) => t.name)
+            : [primaryTemplate.name],
+        templateId: primaryTemplate.id,
+        templateName: primaryTemplate.name,
         customerId: customerId || null,
+        companyStamp: includeCompanyStamp ? companyStamp : null,
       };
 
       if (isEditing) {
@@ -295,6 +493,67 @@ export default function ScheduleMaintenance() {
           </div>
         </section>
 
+        <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase text-muted">
+                Nearby Scheduled Maintenance
+              </p>
+              <p className="text-sm text-ink">
+                Existing bookings before and after your selected dates.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-3 text-sm text-ink">
+            {(() => {
+              const { earlier, later } = getNearbySchedules();
+              return (
+                <>
+                  {earlier.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase text-muted">
+                        Earlier
+                      </p>
+                      <div className="space-y-1">
+                        {earlier.map((entry) => (
+                          <div
+                            key={entry.id}
+                            className="rounded-md border border-border bg-surface px-3 py-2"
+                          >
+                            {fmtScheduleEntry(entry)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {later.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase text-muted">
+                        Later
+                      </p>
+                      <div className="space-y-1">
+                        {later.map((entry) => (
+                          <div
+                            key={entry.id}
+                            className="rounded-md border border-border bg-surface px-3 py-2"
+                          >
+                            {fmtScheduleEntry(entry)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {earlier.length === 0 && later.length === 0 && (
+                    <p className="text-sm text-muted">
+                      No nearby scheduled maintenance was found.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </section>
+
         <section className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-navy-800 text-white">
             <CalendarDays size={18} />
@@ -349,18 +608,15 @@ export default function ScheduleMaintenance() {
         <label className="mb-1 block text-xs font-bold uppercase text-muted">
           Maintenance Name
         </label>
-        <select
+        <input
           value={maintenanceName}
           onChange={(e) => setMaintenanceName(e.target.value)}
+          placeholder="Enter maintenance name"
           className="mb-4 w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
-        >
-          <option>Quarterly Access Door Service</option>
-          <option>HVAC System Check</option>
-          <option>Fire Alarm Testing</option>
-        </select>
+        />
 
         <label className="mb-1 block text-xs font-bold uppercase text-muted">
-          Location Door
+          Location 
         </label>
         <input
           value={locationDoor}
@@ -370,23 +626,121 @@ export default function ScheduleMaintenance() {
         />
 
         <label className="mb-1 block text-xs font-bold uppercase text-muted">
-          Checklist Template
+          Checklist Templates
         </label>
-        <select
-          value={templateId}
-          onChange={(e) => setTemplateId(e.target.value)}
-          className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
-        >
-          {templates.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
+        <div className="space-y-2">
+          {templates.map((t) => {
+            const templateInstances = templateSelections.filter(
+              (sel) => sel.templateId === t.id,
+            );
+            return (
+              <div key={t.id} className="rounded-md border border-border bg-white p-3">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={templateInstances.length > 0}
+                    onChange={() => toggleTemplateSelection(t.id)}
+                    className="h-4 w-4 rounded border-border text-navy-800"
+                  />
+                  <span>{t.name}</span>
+                </label>
+                {templateInstances.length > 0 && (
+                  <div className="mt-3 space-y-3">
+                    <label className="text-xs text-muted">
+                      Number of forms
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          value={templateInstances.length}
+                          onChange={(e) =>
+                            setTemplateCount(t.id, Number(e.target.value) || 1)
+                          }
+                          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setTemplateCount(t.id, templateInstances.length + 1)}
+                          aria-label={`Add form for ${t.name}`}
+                          className="flex h-9 w-9 items-center justify-center rounded-md border border-border text-navy-800 hover:bg-surface"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </label>
+
+                    <div className="overflow-hidden rounded-md border border-border bg-surface">
+                      <div className="hidden md:grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs font-semibold text-muted">
+                        <div>Location / gate</div>
+                        <div className="text-right">Actions</div>
+                      </div>
+                      <div className="space-y-0 divide-y divide-border px-3 py-2">
+                        {templateInstances.map((instance, idx) => (
+                          <div
+                            key={instance.id}
+                            className="grid gap-3 md:grid-cols-[1fr_auto] items-center py-3"
+                          >
+                            <div>
+                              <div className="text-xs font-semibold text-ink">Location / gate #{idx + 1}</div>
+                              <input
+                                value={instance.location}
+                                onChange={(e) =>
+                                  updateTemplateSelection(instance.id, {
+                                    location: e.target.value,
+                                  })
+                                }
+                                placeholder="e.g. Main Entrance - G01"
+                                className="mt-1 w-full rounded-md border border-border bg-white px-3 py-2 text-sm"
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => removeTemplateInstance(instance.id)}
+                                className="rounded-md border border-danger-600 px-3 py-2 text-xs font-semibold text-danger-600 hover:bg-danger-100"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
         <p className="mt-1 text-xs text-muted">
-          This determines which checklist opens when you tap this schedule entry
-          later.
+          Each selected checklist can have multiple locations. One form = one location.
         </p>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
+        <label className="mb-1 block text-xs font-bold uppercase text-muted">
+          Digital COP (Company Stamp)
+        </label>
+        {companyStamp ? (
+          <div className="mb-2 flex items-center gap-3">
+            <img src={companyStamp} alt="Company stamp" className="h-12 w-36 rounded-md border border-border object-contain p-1" />
+            <div className="flex items-center gap-2">
+              <input
+                id="includeCompanyStamp"
+                type="checkbox"
+                checked={includeCompanyStamp}
+                onChange={(e) => setIncludeCompanyStamp(e.target.checked)}
+                className="h-4 w-4 rounded border-border text-navy-800"
+              />
+              <label htmlFor="includeCompanyStamp" className="text-sm text-ink">
+                Include company stamp on generated reports for this schedule
+              </label>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted">No company stamp found. Add one under Settings → Company Profile.</p>
+        )}
       </section>
 
       <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
