@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { CheckCircle2, ChevronRight, MapPin, Upload, X, Share2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, ChevronDown, MapPin, Upload, X, Share2 } from "lucide-react";
 import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
 import { generateServiceReportPDF } from "../lib/generateReport";
 import { readFileAsDataURL } from "../lib/fileUtils";
 import SignaturePad from "../components/SignaturePad";
 import PDFPreviewModal from "../components/PDFPreviewModal";
+import ImagePreviewModal from "../components/ImagePreviewModal";
 
 function sectionSummary(section) {
   if (!section) return { checked: 0, remarks: 0 };
@@ -23,7 +24,17 @@ export default function ReviewSignoff() {
   const [engineerDate, setEngineerDate] = useState(new Date().toISOString().slice(0, 10));
   const [companyStamp, setCompanyStamp] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [savingEngineerDate, setSavingEngineerDate] = useState(false);
+  const [engineerDateMessage, setEngineerDateMessage] = useState("");
   const [previewReport, setPreviewReport] = useState(null);
+  const [expandedSections, setExpandedSections] = useState([]);
+  const [previewImage, setPreviewImage] = useState(null);
+
+  function toggleSection(idx) {
+    setExpandedSections((prev) =>
+      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]
+    );
+  }
 
   function openPreview() {
     setPreviewReport({
@@ -56,12 +67,28 @@ export default function ReviewSignoff() {
     }
   }
 
+  async function saveEngineerDate() {
+    if (!id || !report) return;
+    setSavingEngineerDate(true);
+    setEngineerDateMessage("");
+    try {
+      await updateReport(id, { engineerDate });
+      setReport((prev) => ({ ...prev, engineerDate }));
+      setEngineerDateMessage("Date saved successfully.");
+    } catch (err) {
+      alert(`Gagal simpan tarikh jurutera: ${err.message}`);
+    } finally {
+      setSavingEngineerDate(false);
+    }
+  }
+
   useEffect(() => {
     if (!id) return;
     (async () => {
       const r = await getReport(id);
       setReport(r);
       setEngineerName(r?.leadTechnician ?? "");
+      setEngineerDate(r?.engineerDate ?? new Date().toISOString().slice(0, 10));
     })();
   }, [id]);
 
@@ -162,21 +189,56 @@ export default function ReviewSignoff() {
           <div className="divide-y divide-border">
             {sections.map((s, idx) => {
               const { checked, remarks } = sectionSummary(s.data);
+              const isOpen = expandedSections.includes(idx);
               return (
-                <div key={s.label} className="flex items-center justify-between px-5 py-4">
-                  <div>
-                    <p className="text-xs text-muted">{String(idx + 1).padStart(2, "0")}</p>
-                    <p className="font-bold text-ink">{s.label}</p>
-                    <p className="text-xs text-muted">{checked} Items Checked</p>
-                  </div>
-                  {remarks > 0 ? (
-                    <span className="text-xs font-semibold text-danger-600">
-                      ⓘ {remarks} Remark{remarks > 1 ? "s" : ""}
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1 text-xs font-semibold text-teal-600">
-                      <CheckCircle2 size={14} /> All Pass
-                    </span>
+                <div key={s.label} className="divide-y divide-border">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(idx)}
+                    aria-expanded={isOpen}
+                    className="relative z-10 group flex w-full items-center justify-between px-5 py-4 text-left cursor-pointer hover:bg-navy-50"
+                  >
+                    <div>
+                      <p className="text-xs text-muted">{String(idx + 1).padStart(2, "0")}</p>
+                      <p className="font-bold text-ink">{s.label}</p>
+                      <p className="text-xs text-muted">{checked} Items Checked</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {remarks > 0 ? (
+                        <span className="text-xs font-semibold text-danger-600">
+                          ⓘ {remarks} Remark{remarks > 1 ? "s" : ""}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-xs font-semibold text-teal-600">
+                          <CheckCircle2 size={14} /> All Pass
+                        </span>
+                      )}
+                      {isOpen ? (
+                        <ChevronDown size={18} className="text-navy-700" />
+                      ) : (
+                        <ChevronRight size={18} className="text-navy-700" />
+                      )}
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="bg-surface px-5 py-3 text-sm text-muted">
+                      {s.data.items?.map((item, itemIdx) => (
+                        <div key={item.id ?? `item-${idx}-${itemIdx}`} className="mb-2 rounded-md border border-border bg-white p-3 shadow-sm last:mb-0">
+                          <p className="font-semibold text-ink">{itemIdx + 1}. {item.question}</p>
+                          <p className="text-xs text-muted">Answer: {item.answer ?? "N/A"}</p>
+                          {item.remark ? <p className="mt-1 text-xs text-danger-600">Remark: {item.remark}</p> : null}
+                          {item.photo ? (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewImage(item.photo)}
+                              className="mt-2 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs font-semibold text-navy-800 hover:bg-navy-50"
+                            >
+                              Preview Photo
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               );
@@ -201,7 +263,28 @@ export default function ReviewSignoff() {
                   No signature captured
                 </div>
               )}
-              <p className="mt-2 text-xs text-muted">Date: {report.engineerDate || "-"}</p>
+              <div className="mt-2">
+                <label className="block text-xs text-muted">Date</label>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <input
+                    type="date"
+                    value={engineerDate}
+                    onChange={(e) => setEngineerDate(e.target.value)}
+                    className="rounded-md border border-border bg-surface px-2 py-1 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveEngineerDate}
+                    disabled={savingEngineerDate || engineerDate === (report.engineerDate || "")}
+                    className="rounded-md bg-navy-800 px-3 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {savingEngineerDate ? "Saving…" : "Save"}
+                  </button>
+                </div>
+                {engineerDateMessage && (
+                  <p className="mt-1 text-xs text-teal-600">{engineerDateMessage}</p>
+                )}
+              </div>
             </div>
 
             <div className="rounded-lg border border-border p-4">
@@ -218,7 +301,28 @@ export default function ReviewSignoff() {
                   Not signed yet
                 </div>
               )}
-              <p className="mt-2 text-xs text-muted">Date: {report.reviewDate || "-"}</p>
+              <div className="mt-2">
+                <label className="block text-xs text-muted">Date</label>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <input
+                    type="date"
+                    value={engineerDate}
+                    onChange={(e) => setEngineerDate(e.target.value)}
+                    className="rounded-md border border-border bg-surface px-2 py-1 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveEngineerDate}
+                    disabled={savingEngineerDate || engineerDate === (report.engineerDate || "")}
+                    className="rounded-md bg-navy-800 px-3 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {savingEngineerDate ? "Saving…" : "Save"}
+                  </button>
+                </div>
+                {engineerDateMessage && (
+                  <p className="mt-1 text-xs text-teal-600">{engineerDateMessage}</p>
+                )}
+              </div>
 
               {!report.managerSignature && (
                 <button
@@ -260,6 +364,14 @@ export default function ReviewSignoff() {
         {previewReport && (
           <PDFPreviewModal report={previewReport} onClose={() => setPreviewReport(null)} />
         )}
+
+        {previewImage && (
+          <ImagePreviewModal
+            src={previewImage}
+            alt="Attached remark photo"
+            onClose={() => setPreviewImage(null)}
+          />
+        )}
       </div>
     );
   }
@@ -297,23 +409,57 @@ export default function ReviewSignoff() {
         <div className="divide-y divide-border">
           {sections.map((s, idx) => {
             const { checked, remarks } = sectionSummary(s.data);
+            const isOpen = expandedSections.includes(idx);
             return (
-              <div key={s.label} className="flex items-center justify-between px-5 py-4">
-                <div>
-                  <p className="text-xs text-muted">{String(idx + 1).padStart(2, "0")}</p>
-                  <p className="font-bold text-ink">{s.label}</p>
-                  <p className="text-xs text-muted">{checked} Items Checked</p>
-                </div>
-                {remarks > 0 ? (
-                  <span className="flex items-center gap-1 text-xs font-semibold text-danger-600">
-                    ⓘ {remarks} Remark{remarks > 1 ? "s" : ""}
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-xs font-semibold text-teal-600">
-                    <CheckCircle2 size={14} /> All Pass
-                  </span>
+              <div key={s.label} className="divide-y divide-border">
+                <button
+                  type="button"
+                  onClick={() => toggleSection(idx)}
+                  aria-expanded={isOpen}
+                  className="relative z-10 group flex w-full items-center justify-between px-5 py-4 text-left cursor-pointer hover:bg-navy-50"
+                >
+                  <div>
+                    <p className="text-xs text-muted">{String(idx + 1).padStart(2, "0")}</p>
+                    <p className="font-bold text-ink">{s.label}</p>
+                    <p className="text-xs text-muted">{checked} Items Checked</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {remarks > 0 ? (
+                      <span className="text-xs font-semibold text-danger-600">
+                        ⓘ {remarks} Remark{remarks > 1 ? "s" : ""}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs font-semibold text-teal-600">
+                        <CheckCircle2 size={14} /> All Pass
+                      </span>
+                    )}
+                    {isOpen ? (
+                      <ChevronDown size={18} className="text-navy-700" />
+                    ) : (
+                      <ChevronRight size={18} className="text-navy-700" />
+                    )}
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="bg-surface px-5 py-3 text-sm text-muted">
+                    {s.data.items?.map((item, itemIdx) => (
+                      <div key={item.id ?? `item-${idx}-${itemIdx}`} className="mb-2 rounded-md border border-border bg-white p-3 shadow-sm last:mb-0">
+                        <p className="font-semibold text-ink">{itemIdx + 1}. {item.question}</p>
+                        <p className="text-xs text-muted">Answer: {item.answer ?? "N/A"}</p>
+                        {item.remark ? <p className="mt-1 text-xs text-danger-600">Remark: {item.remark}</p> : null}
+                        {item.photo ? (
+                          <button
+                            type="button"
+                            onClick={() => setPreviewImage(item.photo)}
+                            className="mt-2 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs font-semibold text-navy-800 hover:bg-navy-50"
+                          >
+                            Preview Photo
+                          </button>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
                 )}
-                <ChevronRight size={18} className="text-muted" />
               </div>
             );
           })}
@@ -400,6 +546,14 @@ export default function ReviewSignoff() {
 
       {previewReport && (
         <PDFPreviewModal report={previewReport} onClose={() => setPreviewReport(null)} />
+      )}
+
+      {previewImage && (
+        <ImagePreviewModal
+          src={previewImage}
+          alt="Attached remark photo"
+          onClose={() => setPreviewImage(null)}
+        />
       )}
     </div>
   );
