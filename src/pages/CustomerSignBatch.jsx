@@ -220,6 +220,16 @@ export default function CustomerSignBatch() {
             <p className="mt-1 text-sm text-muted">
               Signed by {reports[0]?.reviewedBy} on {reports[0]?.reviewDate}
             </p>
+            <button
+              type="button"
+              onClick={() => {
+                setJustSigned(false);
+                setReports((prev) => prev.map((r) => ({ ...r, managerSignature: null })));
+              }}
+              className="mt-4 w-full rounded-md border-2 border-navy-800 py-2 text-sm font-bold text-navy-800 hover:bg-navy-50"
+            >
+              Correct Signature
+            </button>
           </section>
         ) : (
           <section className="rounded-xl border border-border bg-card p-5 shadow-sm">

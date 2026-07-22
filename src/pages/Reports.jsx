@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Download, Trash2, Share2, CheckSquare, Square, X } from "lucide-react";
+import { Download, Trash2, Share2, CheckSquare, Square, X, Edit } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import { listRecentReports, deleteReport } from "../lib/reportsApi";
 import { reportResumeUrl } from "../lib/reportResumeUrl";
@@ -127,7 +127,7 @@ export default function Reports() {
             <Share2 size={15} />{" "}
             {batchCopied
               ? "Link Copied ✓"
-              : `Share ${selectedIds.size || ""} Report${selectedIds.size === 1 ? "" : "s"} in One Link`}
+              : `Copy Link to Edit & Sign (${selectedIds.size || ""} Report${selectedIds.size === 1 ? "" : "s"})`}
           </button>
         </section>
       )}
@@ -186,6 +186,14 @@ export default function Reports() {
                     className="rounded-md border border-navy-800 p-2 text-navy-800 hover:bg-navy-50"
                   >
                     <Share2 size={16} />
+                  </button>
+                  <button
+                    onClick={() => navigate(`/checklist/${r.id}/0`)}
+                    aria-label="Edit report"
+                    title="Edit report"
+                    className="rounded-md border border-navy-800 p-2 text-navy-800 hover:bg-navy-50"
+                  >
+                    <Edit size={16} />
                   </button>
                   <button
                     onClick={() => generateServiceReportPDF(r)}
