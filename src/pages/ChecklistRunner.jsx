@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, Camera, X } from "lucide-react";
+import { AlertTriangle, Camera, X, Upload } from "lucide-react";
 import YesNoToggle from "../components/YesNoToggle";
+import CameraCapture from "../components/CameraCapture";
 import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
 import { readImageFileCompressed } from "../lib/fileUtils";
 
@@ -15,6 +16,7 @@ export default function ChecklistRunner() {
   const [remark, setRemark] = useState("");
   const [dateOfService, setDateOfService] = useState("");
   const [saving, setSaving] = useState(false);
+  const [activeCameraItemId, setActiveCameraItemId] = useState(null);
 
   useEffect(() => {
     if (!id) return;
@@ -32,17 +34,42 @@ export default function ChecklistRunner() {
     setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, ...patch } : it)));
   }
 
-  async function handlePhotoChange(itemId, e) {
-    const file = e.target.files?.[0];
+  async function handleFile(itemId, file) {
     if (!file) return;
     try {
       const compressed = await readImageFileCompressed(file);
-      updateItem(itemId, { photo: compressed });
+      setItems((prev) => prev.map((it) => {
+        if (it.id === itemId) {
+          const currentPhotos = it.photos || (it.photo ? [it.photo] : []);
+          if (currentPhotos.length >= 3) {
+            alert("Maximum 3 photos allowed.");
+            return it;
+          }
+          const nextPhotos = [...currentPhotos, compressed];
+          return { ...it, photos: nextPhotos, photo: nextPhotos[0] || null };
+        }
+        return it;
+      }));
     } catch (err) {
       alert(`Gagal muat naik gambar: ${err.message}`);
-    } finally {
-      e.target.value = "";
     }
+  }
+
+  function removePhoto(itemId, index) {
+    setItems((prev) => prev.map((it) => {
+      if (it.id === itemId) {
+        const currentPhotos = it.photos || (it.photo ? [it.photo] : []);
+        const nextPhotos = currentPhotos.filter((_, i) => i !== index);
+        return { ...it, photos: nextPhotos, photo: nextPhotos[0] || null };
+      }
+      return it;
+    }));
+  }
+
+  function handlePhotoChange(itemId, e) {
+    const file = e.target.files?.[0];
+    if (file) handleFile(itemId, file);
+    if (e.target) e.target.value = "";
   }
 
   const totalSteps = report?.sections?.length ?? 0;
@@ -184,31 +211,51 @@ export default function ChecklistRunner() {
             className="mt-3 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
           />
 
-          {item.photo ? (
-            <div className="mt-3 flex items-center gap-3">
-              <img
-                src={item.photo}
-                alt="Attached evidence"
-                className="h-20 w-20 rounded-md border border-border object-cover"
-              />
-              <button
-                onClick={() => updateItem(item.id, { photo: null })}
-                className="flex items-center gap-1 rounded-md border border-danger-600 px-3 py-1.5 text-xs font-semibold text-danger-600 hover:bg-danger-100"
-              >
-                <X size={13} /> Remove Photo
-              </button>
-            </div>
-          ) : (
-            <label className="mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface">
-              <Camera size={16} /> Add Photo
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => handlePhotoChange(item.id, e)}
-                className="hidden"
-              />
-            </label>
-          )}
+          {(() => {
+            const currentPhotos = item.photos || (item.photo ? [item.photo] : []);
+            return (
+              <>
+                {currentPhotos.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    {currentPhotos.map((p, pIdx) => (
+                      <div key={pIdx} className="flex flex-col items-center gap-1">
+                        <img
+                          src={p}
+                          alt={`Attached evidence ${pIdx + 1}`}
+                          className="h-20 w-20 rounded-md border border-border object-cover"
+                        />
+                        <button
+                          onClick={() => removePhoto(item.id, pIdx)}
+                          className="flex items-center gap-1 rounded-md border border-danger-600 px-2 py-1 text-[10px] font-semibold text-danger-600 hover:bg-danger-100"
+                        >
+                          <X size={12} /> Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {currentPhotos.length < 3 && (
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => setActiveCameraItemId(item.id)}
+                      className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface"
+                    >
+                      <Camera size={16} /> Camera
+                    </button>
+                    <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface">
+                      <Upload size={16} /> Gallery
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handlePhotoChange(item.id, e)}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </section>
       ))}
 
@@ -243,6 +290,16 @@ export default function ChecklistRunner() {
       <div className="fixed bottom-20 right-4 rounded-full bg-danger-600 p-3 text-white shadow-lg md:bottom-6">
         <AlertTriangle size={20} />
       </div>
+
+      {activeCameraItemId && (
+        <CameraCapture
+          onCapture={(file) => {
+            handleFile(activeCameraItemId, file);
+            setActiveCameraItemId(null);
+          }}
+          onCancel={() => setActiveCameraItemId(null)}
+        />
+      )}
     </div>
   );
 }
