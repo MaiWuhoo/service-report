@@ -172,15 +172,24 @@ export default function CustomerSign() {
                           <p className="font-semibold text-ink">{itemIdx + 1}. {item.question}</p>
                           <p className="text-xs text-muted">Answer: {item.answer ?? "N/A"}</p>
                           {item.remark ? <p className="mt-1 text-xs text-danger-600">Remark: {item.remark}</p> : null}
-                          {item.photo ? (
-                            <button
-                              type="button"
-                              onClick={() => setPreviewImage(item.photo)}
-                              className="mt-2 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs font-semibold text-navy-800 hover:bg-navy-50"
-                            >
-                              Preview Photo
-                            </button>
-                          ) : null}
+                          {(() => {
+                            const p = item.photos || (item.photo ? [item.photo] : []);
+                            if (p.length === 0) return null;
+                            return (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {p.map((img, i) => (
+                                  <button
+                                    key={i}
+                                    type="button"
+                                    onClick={() => setPreviewImage(img)}
+                                    className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs font-semibold text-navy-800 hover:bg-navy-50"
+                                  >
+                                    Preview Photo {p.length > 1 ? i + 1 : ""}
+                                  </button>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </div>
                       ))}
                     </div>
