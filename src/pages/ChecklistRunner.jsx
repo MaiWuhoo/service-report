@@ -3,8 +3,14 @@ import { useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Camera, X, Upload } from "lucide-react";
 import YesNoToggle from "../components/YesNoToggle";
 import CameraCapture from "../components/CameraCapture";
-import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
-import { readImageFileCompressed } from "../lib/fileUtils";
+import {
+  getReport,
+  updateReport,
+  getScheduleEntry,
+  updateScheduleEntry,
+} from "../lib/reportsApi";
+import { compressImageToBlob } from "../lib/fileUtils";
+import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 
 export default function ChecklistRunner() {
   const { id, step } = useParams();
@@ -17,6 +23,7 @@ export default function ChecklistRunner() {
   const [dateOfService, setDateOfService] = useState("");
   const [saving, setSaving] = useState(false);
   const [activeCameraItemId, setActiveCameraItemId] = useState(null);
+  const [uploadingItemId, setUploadingItemId] = useState(null);
 
   useEffect(() => {
     if (!id) return;
@@ -31,39 +38,59 @@ export default function ChecklistRunner() {
   }, [id, stepIndex]);
 
   function updateItem(itemId, patch) {
-    setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, ...patch } : it)));
+    setItems((prev) =>
+      prev.map((it) => (it.id === itemId ? { ...it, ...patch } : it)),
+    );
   }
 
   async function handleFile(itemId, file) {
     if (!file) return;
+
+    const targetItem = items.find((it) => it.id === itemId);
+    const currentPhotos =
+      targetItem?.photos || (targetItem?.photo ? [targetItem.photo] : []);
+    if (currentPhotos.length >= 3) {
+      alert("Maximum 3 photos allowed.");
+      return;
+    }
+
+    setUploadingItemId(itemId);
     try {
-      const compressed = await readImageFileCompressed(file);
-      setItems((prev) => prev.map((it) => {
-        if (it.id === itemId) {
-          const currentPhotos = it.photos || (it.photo ? [it.photo] : []);
-          if (currentPhotos.length >= 3) {
-            alert("Maximum 3 photos allowed.");
-            return it;
+      // Compress client-side, then upload to Firebase Storage — storing the
+      // photo as base64 directly in the Firestore document blows past its
+      // 1 MiB per-document hard limit once a few photos are attached.
+      const blob = await compressImageToBlob(file);
+      const path = `reports/${id}/${itemId}-${Date.now()}.jpg`;
+      const url = await uploadImageToCloudinary(path, blob);
+
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id === itemId) {
+            const cur = it.photos || (it.photo ? [it.photo] : []);
+            const nextPhotos = [...cur, url];
+            return { ...it, photos: nextPhotos, photo: nextPhotos[0] || null };
           }
-          const nextPhotos = [...currentPhotos, compressed];
-          return { ...it, photos: nextPhotos, photo: nextPhotos[0] || null };
-        }
-        return it;
-      }));
+          return it;
+        }),
+      );
     } catch (err) {
       alert(`Gagal muat naik gambar: ${err.message}`);
+    } finally {
+      setUploadingItemId(null);
     }
   }
 
   function removePhoto(itemId, index) {
-    setItems((prev) => prev.map((it) => {
-      if (it.id === itemId) {
-        const currentPhotos = it.photos || (it.photo ? [it.photo] : []);
-        const nextPhotos = currentPhotos.filter((_, i) => i !== index);
-        return { ...it, photos: nextPhotos, photo: nextPhotos[0] || null };
-      }
-      return it;
-    }));
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id === itemId) {
+          const currentPhotos = it.photos || (it.photo ? [it.photo] : []);
+          const nextPhotos = currentPhotos.filter((_, i) => i !== index);
+          return { ...it, photos: nextPhotos, photo: nextPhotos[0] || null };
+        }
+        return it;
+      }),
+    );
   }
 
   function handlePhotoChange(itemId, e) {
@@ -80,7 +107,9 @@ export default function ChecklistRunner() {
     if (!id || !report) return null;
     setSaving(true);
     try {
-      const nextSections = report.sections.map((s, idx) => (idx === stepIndex ? { ...s, items } : s));
+      const nextSections = report.sections.map((s, idx) =>
+        idx === stepIndex ? { ...s, items } : s,
+      );
       const payload = {
         sections: nextSections,
         status: nextStatus ?? report.status ?? "draft",
@@ -97,12 +126,18 @@ export default function ChecklistRunner() {
           const entry = await getScheduleEntry(scheduleId);
           if (entry && Array.isArray(entry.templateSelections)) {
             const updated = entry.templateSelections.map((s) =>
-              s.reportId === id || s.reportId === report.reportId ? { ...s, status: payload.status } : s,
+              s.reportId === id || s.reportId === report.reportId
+                ? { ...s, status: payload.status }
+                : s,
             );
             const allVerified = updated.every((s) => s.status === "verified");
             await updateScheduleEntry(scheduleId, {
               templateSelections: updated,
-              status: allVerified ? "verified" : updated.some((s) => s.status) ? "in_progress" : entry.status,
+              status: allVerified
+                ? "verified"
+                : updated.some((s) => s.status)
+                  ? "in_progress"
+                  : entry.status,
             });
           }
         }
@@ -145,9 +180,15 @@ export default function ChecklistRunner() {
             />
           )}
           <div>
-            <p className="text-xs font-semibold uppercase text-muted">Service Provider</p>
-            <p className="font-bold text-ink">{report.serviceProvider?.name ?? "-"}</p>
-            <p className="text-sm text-muted">{report.serviceProvider?.address ?? ""}</p>
+            <p className="text-xs font-semibold uppercase text-muted">
+              Service Provider
+            </p>
+            <p className="font-bold text-ink">
+              {report.serviceProvider?.name ?? "-"}
+            </p>
+            <p className="text-sm text-muted">
+              {report.serviceProvider?.address ?? ""}
+            </p>
           </div>
         </div>
 
@@ -162,9 +203,13 @@ export default function ChecklistRunner() {
             />
           )}
           <div>
-            <p className="text-xs font-semibold uppercase text-muted">Customer</p>
+            <p className="text-xs font-semibold uppercase text-muted">
+              Customer
+            </p>
             <p className="font-bold text-ink">{report.customer?.name ?? "-"}</p>
-            <p className="text-sm text-muted">{report.customer?.address ?? ""}</p>
+            <p className="text-sm text-muted">
+              {report.customer?.address ?? ""}
+            </p>
           </div>
         </div>
 
@@ -189,21 +234,29 @@ export default function ChecklistRunner() {
       </section>
 
       <div className="flex items-center justify-between rounded-lg bg-navy-800 px-4 py-3 text-white">
-        <span className="text-sm font-extrabold uppercase tracking-wide">{currentSection.sectionName}</span>
+        <span className="text-sm font-extrabold uppercase tracking-wide">
+          {currentSection.sectionName}
+        </span>
         <span className="text-xs font-semibold opacity-80">
           Step {stepIndex + 1} of {totalSteps}
         </span>
       </div>
 
       {items.map((item, idx) => (
-        <section key={item.id} className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <section
+          key={item.id}
+          className="rounded-xl border border-border bg-card p-5 shadow-sm"
+        >
           <div className="mb-3 flex gap-3">
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface text-xs font-bold text-navy-800">
               {idx + 1}
             </span>
             <p className="font-semibold text-ink">{item.question}</p>
           </div>
-          <YesNoToggle value={item.answer} onChange={(v) => updateItem(item.id, { answer: v })} />
+          <YesNoToggle
+            value={item.answer}
+            onChange={(v) => updateItem(item.id, { answer: v })}
+          />
           <input
             value={item.remark}
             onChange={(e) => updateItem(item.id, { remark: e.target.value })}
@@ -212,13 +265,18 @@ export default function ChecklistRunner() {
           />
 
           {(() => {
-            const currentPhotos = item.photos || (item.photo ? [item.photo] : []);
+            const currentPhotos =
+              item.photos || (item.photo ? [item.photo] : []);
+            const isUploading = uploadingItemId === item.id;
             return (
               <>
                 {currentPhotos.length > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     {currentPhotos.map((p, pIdx) => (
-                      <div key={pIdx} className="flex flex-col items-center gap-1">
+                      <div
+                        key={pIdx}
+                        className="flex flex-col items-center gap-1"
+                      >
                         <img
                           src={p}
                           alt={`Attached evidence ${pIdx + 1}`}
@@ -238,15 +296,19 @@ export default function ChecklistRunner() {
                   <div className="mt-3 flex gap-2">
                     <button
                       onClick={() => setActiveCameraItemId(item.id)}
-                      className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface"
+                      disabled={isUploading}
+                      className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface disabled:opacity-60"
                     >
-                      <Camera size={16} /> Camera
+                      <Camera size={16} />{" "}
+                      {isUploading ? "Uploading…" : "Camera"}
                     </button>
                     <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface">
-                      <Upload size={16} /> Gallery
+                      <Upload size={16} />{" "}
+                      {isUploading ? "Uploading…" : "Gallery"}
                       <input
                         type="file"
                         accept="image/*"
+                        disabled={isUploading}
                         onChange={(e) => handlePhotoChange(item.id, e)}
                         className="hidden"
                       />
@@ -284,7 +346,9 @@ export default function ChecklistRunner() {
         disabled={saving}
         className="w-full rounded-md border-2 border-navy-800 py-3 text-sm font-bold uppercase tracking-wide text-navy-800 hover:bg-navy-50 disabled:opacity-60"
       >
-        {isLastStep ? "Next: Review & Sign-off" : `Next: ${report.sections[stepIndex + 1]?.sectionName}`}
+        {isLastStep
+          ? "Next: Review & Sign-off"
+          : `Next: ${report.sections[stepIndex + 1]?.sectionName}`}
       </button>
 
       <div className="fixed bottom-20 right-4 rounded-full bg-danger-600 p-3 text-white shadow-lg md:bottom-6">

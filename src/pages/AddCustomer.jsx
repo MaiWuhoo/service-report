@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Save, ImagePlus, X } from "lucide-react";
 import { createCustomer, getCustomer, updateCustomer } from "../lib/reportsApi";
-import { readFileAsDataURL } from "../lib/fileUtils";
+import { compressImageToBlob } from "../lib/fileUtils";
+import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 
 export default function AddCustomer() {
   const navigate = useNavigate();
@@ -14,6 +15,7 @@ export default function AddCustomer() {
   const [logo, setLogo] = useState(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEditing);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   useEffect(() => {
     if (!isEditing) return;
@@ -31,10 +33,15 @@ export default function AddCustomer() {
   async function handleLogoChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadingLogo(true);
     try {
-      setLogo(await readFileAsDataURL(file));
+      const blob = await compressImageToBlob(file, 600, 0.85);
+      const url = await uploadImageToCloudinary(`customers/logo-${Date.now()}.jpg`, blob);
+      setLogo(url);
     } catch (err) {
       alert(`Gagal muat naik logo: ${err.message}`);
+    } finally {
+      setUploadingLogo(false);
     }
   }
 
@@ -109,9 +116,17 @@ export default function AddCustomer() {
         ) : (
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed border-border py-6 text-center hover:bg-surface">
             <ImagePlus size={20} className="mb-2 text-navy-700" />
-            <span className="text-sm font-semibold text-navy-700">Upload Logo</span>
+            <span className="text-sm font-semibold text-navy-700">
+              {uploadingLogo ? "Uploading…" : "Upload Logo"}
+            </span>
             <span className="text-xs text-muted">PNG or JPG</span>
-            <input type="file" accept="image/png,image/jpeg" onChange={handleLogoChange} className="hidden" />
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={handleLogoChange}
+              disabled={uploadingLogo}
+              className="hidden"
+            />
           </label>
         )}
       </section>
