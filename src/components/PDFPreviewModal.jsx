@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Download } from "lucide-react";
+import { X, Download, ExternalLink } from "lucide-react";
 import { getReportPDFBlobUrl, generateServiceReportPDF } from "../lib/generateReport";
 
 const SPACING_OPTIONS = [
@@ -44,9 +44,14 @@ export default function PDFPreviewModal({ report, onClose, onConfirm, confirmLab
           </div>
         </div>
 
-        <div className="flex-1 overflow-hidden bg-surface">
+        <div className="flex-1 overflow-auto bg-surface touch-pan-y">
           {blobUrl ? (
-            <iframe src={blobUrl} title="Report PDF preview" className="h-full w-full" />
+            <iframe
+              src={blobUrl}
+              title="Report PDF preview"
+              className="w-full"
+              style={{ minHeight: "60vh", height: "100%", border: 0 }}
+            />
           ) : (
             <p className="p-8 text-center text-muted">Generating preview…</p>
           )}
@@ -58,6 +63,13 @@ export default function PDFPreviewModal({ report, onClose, onConfirm, confirmLab
             className="flex-1 rounded-md border border-border py-2.5 text-sm font-bold text-ink hover:bg-surface"
           >
             Close
+          </button>
+          <button
+            onClick={() => window.open(blobUrl, "_blank")}
+            disabled={!blobUrl}
+            className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-bold text-ink hover:bg-surface"
+          >
+            <ExternalLink size={16} /> Open Fullscreen
           </button>
           <button
             onClick={() => generateServiceReportPDF(report, { spacing })}

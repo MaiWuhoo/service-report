@@ -182,6 +182,16 @@ export async function saveCompanyProfile(data) {
   await setDoc(doc(db, "settings", "company"), data, { merge: true });
 }
 
+export async function getEngineerSignatures() {
+  const snap = await getDoc(doc(db, "settings", "engineerSignatures"));
+  if (!snap.exists()) return [];
+  return snap.data().signatures ?? [];
+}
+
+export async function saveEngineerSignatures(signatures) {
+  await setDoc(doc(db, "settings", "engineerSignatures"), { signatures }, { merge: true });
+}
+
 export async function listChecklistTemplates() {
   const snap = await getDocs(templatesCol);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
