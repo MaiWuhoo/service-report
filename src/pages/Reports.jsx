@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Download, Trash2, Share2, CheckSquare, Square, X, Edit } from "lucide-react";
+import {
+  Download,
+  Trash2,
+  Share2,
+  CheckSquare,
+  Square,
+  X,
+  Edit,
+} from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import { listRecentReports, deleteReport } from "../lib/reportsApi";
 import { reportResumeUrl } from "../lib/reportResumeUrl";
@@ -15,6 +23,7 @@ export default function Reports() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [batchCopied, setBatchCopied] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   async function load() {
     try {
@@ -62,6 +71,18 @@ export default function Reports() {
       setTimeout(() => setCopiedId(null), 2000);
     } catch {
       window.prompt("Copy this link:", url);
+    }
+  }
+
+  async function handleDownload(report) {
+    setDownloadingId(report.id);
+    try {
+      await generateServiceReportPDF(report);
+    } catch (err) {
+      console.error("Failed to generate PDF:", err);
+      alert(`Gagal generate PDF: ${err.message}`);
+    } finally {
+      setDownloadingId(null);
     }
   }
 
@@ -196,10 +217,11 @@ export default function Reports() {
                     <Edit size={16} />
                   </button>
                   <button
-                    onClick={() => generateServiceReportPDF(r)}
+                    onClick={() => handleDownload(r)}
+                    disabled={downloadingId === r.id}
                     aria-label="Download PDF"
                     title="Download PDF"
-                    className="rounded-md border border-navy-800 p-2 text-navy-800 hover:bg-navy-50"
+                    className="rounded-md border border-navy-800 p-2 text-navy-800 hover:bg-navy-50 disabled:opacity-60"
                   >
                     <Download size={16} />
                   </button>
@@ -221,3 +243,4 @@ export default function Reports() {
     </div>
   );
 }
+

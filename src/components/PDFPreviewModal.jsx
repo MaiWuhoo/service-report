@@ -11,12 +11,43 @@ const SPACING_OPTIONS = [
 export default function PDFPreviewModal({ report, onClose, onConfirm, confirmLabel }) {
   const [blobUrl, setBlobUrl] = useState(null);
   const [spacing, setSpacing] = useState("normal");
+  const [rendering, setRendering] = useState(true);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
-    const url = getReportPDFBlobUrl(report, { spacing });
-    setBlobUrl(url);
-    return () => URL.revokeObjectURL(url);
+    let cancelled = false;
+    setRendering(true);
+
+    (async () => {
+      try {
+        const url = await getReportPDFBlobUrl(report, { spacing });
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setBlobUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
+      } catch (err) {
+        console.error("Failed to generate preview:", err);
+      } finally {
+        if (!cancelled) setRendering(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, spacing]);
+
+  useEffect(() => {
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 md:p-6">
@@ -44,12 +75,13 @@ export default function PDFPreviewModal({ report, onClose, onConfirm, confirmLab
           </div>
         </div>
 
-        <div className="flex-1 overflow-hidden bg-surface">
-          {blobUrl ? (
-            <iframe src={blobUrl} title="Report PDF preview" className="h-full w-full" />
-          ) : (
-            <p className="p-8 text-center text-muted">Generating preview…</p>
+        <div className="relative flex-1 overflow-hidden bg-surface">
+          {rendering && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface/80">
+              <p className="text-sm font-semibold text-muted">Generating preview…</p>
+            </div>
           )}
+          {blobUrl && <iframe src={blobUrl} title="Report PDF preview" className="h-full w-full" />}
         </div>
 
         <div className="flex flex-col gap-2 border-t border-border p-4 sm:flex-row">
@@ -60,10 +92,20 @@ export default function PDFPreviewModal({ report, onClose, onConfirm, confirmLab
             Close
           </button>
           <button
-            onClick={() => generateServiceReportPDF(report, { spacing })}
-            className="flex flex-1 items-center justify-center gap-2 rounded-md border-2 border-navy-800 py-2.5 text-sm font-bold text-navy-800 hover:bg-navy-50"
+            onClick={async () => {
+              setDownloading(true);
+              try {
+                await generateServiceReportPDF(report, { spacing });
+              } catch (err) {
+                alert(`Gagal generate PDF: ${err.message}`);
+              } finally {
+                setDownloading(false);
+              }
+            }}
+            disabled={downloading}
+            className="flex flex-1 items-center justify-center gap-2 rounded-md border-2 border-navy-800 py-2.5 text-sm font-bold text-navy-800 hover:bg-navy-50 disabled:opacity-60"
           >
-            <Download size={16} /> Download PDF
+            <Download size={16} /> {downloading ? "Preparing…" : "Download PDF"}
           </button>
           {onConfirm && (
             <button

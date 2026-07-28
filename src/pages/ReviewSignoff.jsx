@@ -1,9 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { CheckCircle2, ChevronRight, ChevronDown, MapPin, Upload, X, Share2 } from "lucide-react";
-import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
+import {
+  CheckCircle2,
+  ChevronRight,
+  ChevronDown,
+  MapPin,
+  Upload,
+  X,
+  Share2,
+} from "lucide-react";
+import {
+  getReport,
+  updateReport,
+  getScheduleEntry,
+  updateScheduleEntry,
+} from "../lib/reportsApi";
 import { generateServiceReportPDF } from "../lib/generateReport";
-import { readFileAsDataURL } from "../lib/fileUtils";
+import { compressImageToBlob } from "../lib/fileUtils";
+import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 import SignaturePad from "../components/SignaturePad";
 import PDFPreviewModal from "../components/PDFPreviewModal";
 import ImagePreviewModal from "../components/ImagePreviewModal";
@@ -11,7 +25,9 @@ import ImagePreviewModal from "../components/ImagePreviewModal";
 function sectionSummary(section) {
   if (!section) return { checked: 0, remarks: 0 };
   const checked = section.items.length;
-  const remarks = section.items.filter((i) => i.remark && i.remark.trim() !== "").length;
+  const remarks = section.items.filter(
+    (i) => i.remark && i.remark.trim() !== "",
+  ).length;
   return { checked, remarks };
 }
 
@@ -21,8 +37,11 @@ export default function ReviewSignoff() {
 
   const [engineerName, setEngineerName] = useState("");
   const engineerCanvasRef = useRef(null);
-  const [engineerDate, setEngineerDate] = useState(new Date().toISOString().slice(0, 10));
+  const [engineerDate, setEngineerDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
   const [companyStamp, setCompanyStamp] = useState(null);
+  const [uploadingStamp, setUploadingStamp] = useState(false);
   const [copied, setCopied] = useState(false);
   const [savingEngineerDate, setSavingEngineerDate] = useState(false);
   const [engineerDateMessage, setEngineerDateMessage] = useState("");
@@ -32,7 +51,7 @@ export default function ReviewSignoff() {
 
   function toggleSection(idx) {
     setExpandedSections((prev) =>
-      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]
+      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx],
     );
   }
 
@@ -60,10 +79,18 @@ export default function ReviewSignoff() {
   async function handleStampChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadingStamp(true);
     try {
-      setCompanyStamp(await readFileAsDataURL(file));
+      const blob = await compressImageToBlob(file, 500, 0.85);
+      const url = await uploadImageToCloudinary(
+        `reports/${id}/stamp-${Date.now()}.jpg`,
+        blob,
+      );
+      setCompanyStamp(url);
     } catch (err) {
       alert(`Gagal muat naik company stamp: ${err.message}`);
+    } finally {
+      setUploadingStamp(false);
     }
   }
 
@@ -101,10 +128,6 @@ export default function ReviewSignoff() {
     if (!id || !report) return;
     const engineerSignature = engineerCanvasRef.current?.toDataURL("image/png");
 
-    // Only the engineer signs internally. "Verified by Manager/Team" is the
-    // same person as the customer in this business, so that box is left
-    // blank here and gets filled in later when the customer signs via the
-    // shareable /sign/:id link (see CustomerSign.jsx).
     const payload = {
       status: "verified",
       engineerName,
@@ -118,7 +141,10 @@ export default function ReviewSignoff() {
       if (report.scheduleId) {
         try {
           const entry = await getScheduleEntry(report.scheduleId);
-          if (entry?.templateSelections && Array.isArray(entry.templateSelections)) {
+          if (
+            entry?.templateSelections &&
+            Array.isArray(entry.templateSelections)
+          ) {
             const updated = entry.templateSelections.map((s) =>
               s.reportId === report.reportId || s.reportId === report.id
                 ? { ...s, status: "verified" }
@@ -130,15 +156,16 @@ export default function ReviewSignoff() {
               status: allVerified ? "verified" : "in_progress",
             });
           } else {
-            // legacy single-report schedule
-            await updateScheduleEntry(report.scheduleId, { status: "verified" });
+            await updateScheduleEntry(report.scheduleId, {
+              status: "verified",
+            });
           }
         } catch (err) {
           console.error("Failed to update schedule entry after verify:", err);
         }
       }
       setReport((prev) => ({ ...prev, ...payload }));
-      generateServiceReportPDF({ ...report, ...payload });
+      await generateServiceReportPDF({ ...report, ...payload });
     } catch (err) {
       console.error("Failed to finalize report:", err);
       alert(`Gagal finalize laporan: ${err.message}`);
@@ -149,7 +176,10 @@ export default function ReviewSignoff() {
     return <p className="py-10 text-center text-muted">Loading report…</p>;
   }
 
-  const sections = (report.sections ?? []).map((s) => ({ label: s.sectionName, data: s }));
+  const sections = (report.sections ?? []).map((s) => ({
+    label: s.sectionName,
+    data: s,
+  }));
   const lastSectionWithRemark = [...(report.sections ?? [])]
     .reverse()
     .flatMap((s) => s.items)
@@ -163,28 +193,38 @@ export default function ReviewSignoff() {
           <div>
             <p className="font-bold text-teal-600">Verified &amp; Finalized</p>
             <p className="text-sm text-muted">
-              This report has already been signed off internally. It&apos;s now part of the
-              history log.
+              This report has already been signed off internally. It&apos;s now
+              part of the history log.
             </p>
           </div>
         </section>
 
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase text-muted">Report ID</p>
-          <div className="mb-3 rounded-md bg-surface px-3 py-2 text-sm font-semibold">{report.reportId}</div>
-          <p className="text-xs font-semibold uppercase text-muted">Inspection Date</p>
+          <p className="text-xs font-semibold uppercase text-muted">
+            Report ID
+          </p>
+          <div className="mb-3 rounded-md bg-surface px-3 py-2 text-sm font-semibold">
+            {report.reportId}
+          </div>
+          <p className="text-xs font-semibold uppercase text-muted">
+            Inspection Date
+          </p>
           <p className="mb-3 font-bold">{report.dateOfService}</p>
           <p className="text-xs font-semibold uppercase text-muted">Location</p>
           <p className="mb-3 flex items-center gap-1 font-bold">
             <MapPin size={16} className="text-navy-700" /> {report.locationDoor}
           </p>
-          <p className="text-xs font-semibold uppercase text-muted">Checklist Used</p>
+          <p className="text-xs font-semibold uppercase text-muted">
+            Checklist Used
+          </p>
           <p className="font-bold">{report.templateName ?? "-"}</p>
         </section>
 
         <section className="rounded-xl border border-border bg-card shadow-sm">
           <div className="border-b border-border px-5 py-3">
-            <h3 className="text-sm font-bold uppercase text-navy-800">Checklist Status Overview</h3>
+            <h3 className="text-sm font-bold uppercase text-navy-800">
+              Checklist Status Overview
+            </h3>
           </div>
           <div className="divide-y divide-border">
             {sections.map((s, idx) => {
@@ -199,9 +239,13 @@ export default function ReviewSignoff() {
                     className="relative z-10 group flex w-full items-center justify-between px-5 py-4 text-left cursor-pointer hover:bg-navy-50"
                   >
                     <div>
-                      <p className="text-xs text-muted">{String(idx + 1).padStart(2, "0")}</p>
+                      <p className="text-xs text-muted">
+                        {String(idx + 1).padStart(2, "0")}
+                      </p>
                       <p className="font-bold text-ink">{s.label}</p>
-                      <p className="text-xs text-muted">{checked} Items Checked</p>
+                      <p className="text-xs text-muted">
+                        {checked} Items Checked
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
                       {remarks > 0 ? (
@@ -223,12 +267,24 @@ export default function ReviewSignoff() {
                   {isOpen && (
                     <div className="bg-surface px-5 py-3 text-sm text-muted">
                       {s.data.items?.map((item, itemIdx) => (
-                        <div key={item.id ?? `item-${idx}-${itemIdx}`} className="mb-2 rounded-md border border-border bg-white p-3 shadow-sm last:mb-0">
-                          <p className="font-semibold text-ink">{itemIdx + 1}. {item.question}</p>
-                          <p className="text-xs text-muted">Answer: {item.answer ?? "N/A"}</p>
-                          {item.remark ? <p className="mt-1 text-xs text-danger-600">Remark: {item.remark}</p> : null}
+                        <div
+                          key={item.id ?? `item-${idx}-${itemIdx}`}
+                          className="mb-2 rounded-md border border-border bg-white p-3 shadow-sm last:mb-0"
+                        >
+                          <p className="font-semibold text-ink">
+                            {itemIdx + 1}. {item.question}
+                          </p>
+                          <p className="text-xs text-muted">
+                            Answer: {item.answer ?? "N/A"}
+                          </p>
+                          {item.remark ? (
+                            <p className="mt-1 text-xs text-danger-600">
+                              Remark: {item.remark}
+                            </p>
+                          ) : null}
                           {(() => {
-                            const p = item.photos || (item.photo ? [item.photo] : []);
+                            const p =
+                              item.photos || (item.photo ? [item.photo] : []);
                             if (p.length === 0) return null;
                             return (
                               <div className="mt-2 flex flex-wrap gap-2">
@@ -256,11 +312,17 @@ export default function ReviewSignoff() {
         </section>
 
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h3 className="mb-4 text-sm font-bold uppercase text-navy-800">Sign-off Record</h3>
+          <h3 className="mb-4 text-sm font-bold uppercase text-navy-800">
+            Sign-off Record
+          </h3>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-lg border border-border p-4">
-              <p className="mb-1 text-xs font-bold uppercase text-navy-800">Checked by Engineer</p>
-              <p className="mb-2 text-sm font-semibold text-ink">{report.engineerName || "-"}</p>
+              <p className="mb-1 text-xs font-bold uppercase text-navy-800">
+                Checked by Engineer
+              </p>
+              <p className="mb-2 text-sm font-semibold text-ink">
+                {report.engineerName || "-"}
+              </p>
               {report.engineerSignature ? (
                 <img
                   src={report.engineerSignature}
@@ -284,21 +346,30 @@ export default function ReviewSignoff() {
                   <button
                     type="button"
                     onClick={saveEngineerDate}
-                    disabled={savingEngineerDate || engineerDate === (report.engineerDate || "")}
+                    disabled={
+                      savingEngineerDate ||
+                      engineerDate === (report.engineerDate || "")
+                    }
                     className="rounded-md bg-navy-800 px-3 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {savingEngineerDate ? "Saving…" : "Save"}
                   </button>
                 </div>
                 {engineerDateMessage && (
-                  <p className="mt-1 text-xs text-teal-600">{engineerDateMessage}</p>
+                  <p className="mt-1 text-xs text-teal-600">
+                    {engineerDateMessage}
+                  </p>
                 )}
               </div>
             </div>
 
             <div className="rounded-lg border border-border p-4">
-              <p className="mb-1 text-xs font-bold uppercase text-navy-800">Verified by Manager/Team</p>
-              <p className="mb-2 text-sm font-semibold text-ink">{report.reviewedBy || "-"}</p>
+              <p className="mb-1 text-xs font-bold uppercase text-navy-800">
+                Verified by Manager/Team
+              </p>
+              <p className="mb-2 text-sm font-semibold text-ink">
+                {report.reviewedBy || "-"}
+              </p>
               {report.managerSignature ? (
                 <img
                   src={report.managerSignature}
@@ -322,14 +393,19 @@ export default function ReviewSignoff() {
                   <button
                     type="button"
                     onClick={saveEngineerDate}
-                    disabled={savingEngineerDate || engineerDate === (report.engineerDate || "")}
+                    disabled={
+                      savingEngineerDate ||
+                      engineerDate === (report.engineerDate || "")
+                    }
                     className="rounded-md bg-navy-800 px-3 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {savingEngineerDate ? "Saving…" : "Save"}
                   </button>
                 </div>
                 {engineerDateMessage && (
-                  <p className="mt-1 text-xs text-teal-600">{engineerDateMessage}</p>
+                  <p className="mt-1 text-xs text-teal-600">
+                    {engineerDateMessage}
+                  </p>
                 )}
               </div>
 
@@ -338,7 +414,8 @@ export default function ReviewSignoff() {
                   onClick={handleCopySignLink}
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-md border-2 border-navy-800 py-2 text-xs font-bold text-navy-800 hover:bg-navy-50"
                 >
-                  <Share2 size={14} /> {copied ? "Link Copied ✓" : "Copy Sign-off Link"}
+                  <Share2 size={14} />{" "}
+                  {copied ? "Link Copied ✓" : "Copy Sign-off Link"}
                 </button>
               )}
             </div>
@@ -351,14 +428,17 @@ export default function ReviewSignoff() {
                 alt="Company stamp"
                 className="h-16 w-16 rounded-md border border-border bg-white object-contain p-1"
               />
-              <p className="text-xs font-semibold uppercase text-navy-800">Company Stamp on File</p>
+              <p className="text-xs font-semibold uppercase text-navy-800">
+                Company Stamp on File
+              </p>
             </div>
           )}
 
           {!report.managerSignature && (
             <p className="mt-3 text-center text-xs text-muted">
-              Share the link above with the customer — they&apos;ll see only this report and
-              their signature fills the &quot;Verified by Manager/Team&quot; box.
+              Share the link above with the customer — they&apos;ll see only
+              this report and their signature fills the &quot;Verified by
+              Manager/Team&quot; box.
             </p>
           )}
 
@@ -371,7 +451,10 @@ export default function ReviewSignoff() {
         </section>
 
         {previewReport && (
-          <PDFPreviewModal report={previewReport} onClose={() => setPreviewReport(null)} />
+          <PDFPreviewModal
+            report={previewReport}
+            onClose={() => setPreviewReport(null)}
+          />
         )}
 
         {previewImage && (
@@ -392,9 +475,13 @@ export default function ReviewSignoff() {
           Internal Verification
         </span>
         <p className="text-xs font-semibold uppercase text-muted">Report ID</p>
-        <div className="mb-3 rounded-md bg-surface px-3 py-2 text-sm font-semibold">{report.reportId}</div>
+        <div className="mb-3 rounded-md bg-surface px-3 py-2 text-sm font-semibold">
+          {report.reportId}
+        </div>
 
-        <p className="text-xs font-semibold uppercase text-muted">Inspection Date</p>
+        <p className="text-xs font-semibold uppercase text-muted">
+          Inspection Date
+        </p>
         <p className="mb-3 font-bold">{report.dateOfService}</p>
 
         <p className="text-xs font-semibold uppercase text-muted">Location</p>
@@ -402,7 +489,9 @@ export default function ReviewSignoff() {
           <MapPin size={16} className="text-navy-700" /> {report.locationDoor}
         </p>
 
-        <p className="text-xs font-semibold uppercase text-muted">Lead Technician</p>
+        <p className="text-xs font-semibold uppercase text-muted">
+          Lead Technician
+        </p>
         <p className="flex items-center gap-2 font-bold">
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-500 text-xs text-white">
             {(report.leadTechnician ?? "?").charAt(0)}
@@ -413,7 +502,9 @@ export default function ReviewSignoff() {
 
       <section className="rounded-xl border border-border bg-card shadow-sm">
         <div className="border-b border-border px-5 py-3">
-          <h3 className="text-sm font-bold uppercase text-navy-800">Checklist Status Overview</h3>
+          <h3 className="text-sm font-bold uppercase text-navy-800">
+            Checklist Status Overview
+          </h3>
         </div>
         <div className="divide-y divide-border">
           {sections.map((s, idx) => {
@@ -428,9 +519,13 @@ export default function ReviewSignoff() {
                   className="relative z-10 group flex w-full items-center justify-between px-5 py-4 text-left cursor-pointer hover:bg-navy-50"
                 >
                   <div>
-                    <p className="text-xs text-muted">{String(idx + 1).padStart(2, "0")}</p>
+                    <p className="text-xs text-muted">
+                      {String(idx + 1).padStart(2, "0")}
+                    </p>
                     <p className="font-bold text-ink">{s.label}</p>
-                    <p className="text-xs text-muted">{checked} Items Checked</p>
+                    <p className="text-xs text-muted">
+                      {checked} Items Checked
+                    </p>
                   </div>
                   <div className="flex items-center gap-3">
                     {remarks > 0 ? (
@@ -452,12 +547,24 @@ export default function ReviewSignoff() {
                 {isOpen && (
                   <div className="bg-surface px-5 py-3 text-sm text-muted">
                     {s.data.items?.map((item, itemIdx) => (
-                      <div key={item.id ?? `item-${idx}-${itemIdx}`} className="mb-2 rounded-md border border-border bg-white p-3 shadow-sm last:mb-0">
-                        <p className="font-semibold text-ink">{itemIdx + 1}. {item.question}</p>
-                        <p className="text-xs text-muted">Answer: {item.answer ?? "N/A"}</p>
-                        {item.remark ? <p className="mt-1 text-xs text-danger-600">Remark: {item.remark}</p> : null}
+                      <div
+                        key={item.id ?? `item-${idx}-${itemIdx}`}
+                        className="mb-2 rounded-md border border-border bg-white p-3 shadow-sm last:mb-0"
+                      >
+                        <p className="font-semibold text-ink">
+                          {itemIdx + 1}. {item.question}
+                        </p>
+                        <p className="text-xs text-muted">
+                          Answer: {item.answer ?? "N/A"}
+                        </p>
+                        {item.remark ? (
+                          <p className="mt-1 text-xs text-danger-600">
+                            Remark: {item.remark}
+                          </p>
+                        ) : null}
                         {(() => {
-                          const p = item.photos || (item.photo ? [item.photo] : []);
+                          const p =
+                            item.photos || (item.photo ? [item.photo] : []);
                           if (p.length === 0) return null;
                           return (
                             <div className="mt-2 flex flex-wrap gap-2">
@@ -485,14 +592,21 @@ export default function ReviewSignoff() {
       </section>
 
       <section className="rounded-xl border-l-4 border-navy-800 bg-navy-50 p-4 text-sm italic text-navy-800">
-        {lastSectionWithRemark ? <>“{lastSectionWithRemark.remark}”</> : "No remarks recorded for this report."}
+        {lastSectionWithRemark ? (
+          <>“{lastSectionWithRemark.remark}”</>
+        ) : (
+          "No remarks recorded for this report."
+        )}
       </section>
 
       <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <h3 className="mb-4 text-sm font-bold uppercase text-navy-800">Engineer Sign-off</h3>
+        <h3 className="mb-4 text-sm font-bold uppercase text-navy-800">
+          Engineer Sign-off
+        </h3>
         <p className="mb-4 text-sm text-muted">
-          Only the engineer signs here. The &quot;Verified by Manager/Team&quot; signature is
-          collected later from the customer via a shareable link, after you finalize.
+          Only the engineer signs here. The &quot;Verified by Manager/Team&quot;
+          signature is collected later from the customer via a shareable link,
+          after you finalize.
         </p>
 
         <div className="space-y-4">
@@ -505,7 +619,9 @@ export default function ReviewSignoff() {
           />
 
           <div>
-            <label className="mb-1 block text-sm font-semibold text-ink">Digital COP (Company Stamp)</label>
+            <label className="mb-1 block text-sm font-semibold text-ink">
+              Digital COP (Company Stamp)
+            </label>
             {companyStamp ? (
               <div className="flex items-center gap-3 rounded-md border border-border bg-surface p-3">
                 <img
@@ -523,19 +639,26 @@ export default function ReviewSignoff() {
             ) : (
               <label className="flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed border-border py-6 text-center hover:bg-surface">
                 <Upload size={20} className="mb-2 text-navy-700" />
-                <p className="text-sm font-semibold text-navy-700">Attach Company Stamp</p>
-                <p className="text-xs text-muted">PNG or JPG with transparent background preferred</p>
+                <p className="text-sm font-semibold text-navy-700">
+                  {uploadingStamp ? "Uploading…" : "Attach Company Stamp"}
+                </p>
+                <p className="text-xs text-muted">
+                  PNG or JPG with transparent background preferred
+                </p>
                 <input
                   type="file"
                   accept="image/png,image/jpeg"
                   onChange={handleStampChange}
+                  disabled={uploadingStamp}
                   className="hidden"
                 />
               </label>
             )}
           </div>
 
-          <label className="mb-1 block text-sm font-semibold text-ink">Approval Date</label>
+          <label className="mb-1 block text-sm font-semibold text-ink">
+            Approval Date
+          </label>
           <input
             type="date"
             value={engineerDate}
@@ -557,13 +680,17 @@ export default function ReviewSignoff() {
           ✓ Approve &amp; Finalize Report
         </button>
         <p className="mt-2 text-center text-xs text-muted">
-          After this, you can share a sign-off link with the customer so they can add their
-          signature to the &quot;Verified by Manager/Team&quot; box.
+          After this, you can share a sign-off link with the customer so they
+          can add their signature to the &quot;Verified by Manager/Team&quot;
+          box.
         </p>
       </section>
 
       {previewReport && (
-        <PDFPreviewModal report={previewReport} onClose={() => setPreviewReport(null)} />
+        <PDFPreviewModal
+          report={previewReport}
+          onClose={() => setPreviewReport(null)}
+        />
       )}
 
       {previewImage && (

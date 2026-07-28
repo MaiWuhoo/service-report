@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { ImagePlus, Save, X } from "lucide-react";
 import { getCompanyProfile, saveCompanyProfile } from "../lib/reportsApi";
 import { DEFAULT_COMPANY } from "../lib/defaultTemplates";
-import { readFileAsDataURL } from "../lib/fileUtils";
+import { compressImageToBlob } from "../lib/fileUtils";
+import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 
 export default function SettingsPage() {
   const [name, setName] = useState(DEFAULT_COMPANY.name);
@@ -13,6 +14,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingStamp, setUploadingStamp] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -35,22 +38,36 @@ export default function SettingsPage() {
   async function handleLogoChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadingLogo(true);
     try {
-      const dataUrl = await readFileAsDataURL(file);
-      setLogo(dataUrl);
+      const blob = await compressImageToBlob(file, 600, 0.85);
+      const url = await uploadImageToCloudinary(
+        `company/logo-${Date.now()}.jpg`,
+        blob,
+      );
+      setLogo(url);
     } catch (err) {
       alert(`Gagal muat naik logo: ${err.message}`);
+    } finally {
+      setUploadingLogo(false);
     }
   }
 
   async function handleCompanyStampChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadingStamp(true);
     try {
-      const dataUrl = await readFileAsDataURL(file);
-      setCompanyStamp(dataUrl);
+      const blob = await compressImageToBlob(file, 500, 0.85);
+      const url = await uploadImageToCloudinary(
+        `company/stamp-${Date.now()}.jpg`,
+        blob,
+      );
+      setCompanyStamp(url);
     } catch (err) {
       alert(`Gagal muat naik company stamp: ${err.message}`);
+    } finally {
+      setUploadingStamp(false);
     }
   }
 
@@ -74,17 +91,21 @@ export default function SettingsPage() {
       <h2 className="text-2xl font-extrabold text-ink">Settings</h2>
 
       <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <h3 className="mb-1 text-sm font-bold uppercase text-navy-800">Company Profile</h3>
+        <h3 className="mb-1 text-sm font-bold uppercase text-navy-800">
+          Company Profile
+        </h3>
         <p className="mb-4 text-sm text-muted">
-          This appears as the &quot;Service Provider&quot; on every checklist and generated
-          PDF report.
+          This appears as the &quot;Service Provider&quot; on every checklist
+          and generated PDF report.
         </p>
 
         {loading ? (
           <p className="text-sm text-muted">Loading…</p>
         ) : (
           <>
-            <label className="mb-1 block text-sm font-semibold text-ink">Company Name</label>
+            <label className="mb-1 block text-sm font-semibold text-ink">
+              Company Name
+            </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -92,7 +113,9 @@ export default function SettingsPage() {
               className="mb-4 w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
             />
 
-            <label className="mb-1 block text-sm font-semibold text-ink">Address</label>
+            <label className="mb-1 block text-sm font-semibold text-ink">
+              Address
+            </label>
             <textarea
               value={address}
               onChange={(e) => setAddress(e.target.value)}
@@ -101,7 +124,9 @@ export default function SettingsPage() {
               className="mb-4 w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
             />
 
-            <label className="mb-1 block text-sm font-semibold text-ink">Company Logo</label>
+            <label className="mb-1 block text-sm font-semibold text-ink">
+              Company Logo
+            </label>
             {logo ? (
               <div className="mb-4 flex items-center gap-3">
                 <img
@@ -119,13 +144,23 @@ export default function SettingsPage() {
             ) : (
               <label className="mb-4 flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed border-border py-6 text-center hover:bg-surface">
                 <ImagePlus size={20} className="mb-2 text-navy-700" />
-                <span className="text-sm font-semibold text-navy-700">Upload Logo</span>
+                <span className="text-sm font-semibold text-navy-700">
+                  {uploadingLogo ? "Uploading…" : "Upload Logo"}
+                </span>
                 <span className="text-xs text-muted">PNG or JPG</span>
-                <input type="file" accept="image/png,image/jpeg" onChange={handleLogoChange} className="hidden" />
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  onChange={handleLogoChange}
+                  disabled={uploadingLogo}
+                  className="hidden"
+                />
               </label>
             )}
 
-            <label className="mb-1 mt-4 block text-sm font-semibold text-ink">Digital COP (Company Stamp)</label>
+            <label className="mb-1 mt-4 block text-sm font-semibold text-ink">
+              Digital COP (Company Stamp)
+            </label>
             {companyStamp ? (
               <div className="mb-4 flex items-center gap-3">
                 <img
@@ -143,9 +178,17 @@ export default function SettingsPage() {
             ) : (
               <label className="mb-4 flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed border-border py-6 text-center hover:bg-surface">
                 <ImagePlus size={20} className="mb-2 text-navy-700" />
-                <span className="text-sm font-semibold text-navy-700">Upload Company Stamp</span>
+                <span className="text-sm font-semibold text-navy-700">
+                  {uploadingStamp ? "Uploading…" : "Upload Company Stamp"}
+                </span>
                 <span className="text-xs text-muted">PNG or JPG</span>
-                <input type="file" accept="image/png,image/jpeg" onChange={handleCompanyStampChange} className="hidden" />
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  onChange={handleCompanyStampChange}
+                  disabled={uploadingStamp}
+                  className="hidden"
+                />
               </label>
             )}
 
@@ -154,7 +197,8 @@ export default function SettingsPage() {
               disabled={saving}
               className="flex w-full items-center justify-center gap-2 rounded-md bg-navy-800 py-3 text-sm font-bold text-white hover:bg-navy-700 disabled:opacity-60"
             >
-              <Save size={16} /> {saving ? "Saving…" : saved ? "Saved ✓" : "Save Company Profile"}
+              <Save size={16} />{" "}
+              {saving ? "Saving…" : saved ? "Saved ✓" : "Save Company Profile"}
             </button>
           </>
         )}
@@ -162,9 +206,12 @@ export default function SettingsPage() {
 
       <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <p className="text-sm text-muted">
-          Customer name, address and logo are managed separately so they can be reused across
-          templates — set them up under{" "}
-          <Link to="/customers" className="font-semibold text-navy-700 hover:underline">
+          Customer name, address and logo are managed separately so they can be
+          reused across templates — set them up under{" "}
+          <Link
+            to="/customers"
+            className="font-semibold text-navy-700 hover:underline"
+          >
             Customers
           </Link>
           , then pick one when building a checklist template.
