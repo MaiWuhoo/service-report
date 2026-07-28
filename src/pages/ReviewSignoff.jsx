@@ -214,7 +214,8 @@ export default function ReviewSignoff() {
         }
       }
       setReport((prev) => ({ ...prev, ...payload }));
-      generateServiceReportPDF({ ...report, ...payload });
+      // Open preview modal instead of forcing an automatic download
+      setPreviewReport({ ...report, ...payload });
     } catch (err) {
       console.error("Failed to finalize report:", err);
       alert(`Gagal finalize laporan: ${err.message}`);
