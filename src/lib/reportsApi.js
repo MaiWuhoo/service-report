@@ -12,6 +12,7 @@ import {
   limit,
   serverTimestamp,
   runTransaction,
+  onSnapshot,
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -63,6 +64,44 @@ export async function updateReport(id, data) {
   await updateDoc(doc(db, "serviceReports", id), {
     ...data,
     updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateReportSection(id, stepIndex, items, extraPayload = {}) {
+  const reportRef = doc(db, "serviceReports", id);
+  return await runTransaction(db, async (tx) => {
+    const snap = await tx.get(reportRef);
+    if (!snap.exists()) throw new Error("Report not found");
+    const data = snap.data();
+    
+    // Safely update only the specific section by index
+    const nextSections = data.sections.map((s, idx) => 
+      idx === stepIndex ? { ...s, items } : s
+    );
+    
+    const nextData = {
+      ...data,
+      ...extraPayload,
+      sections: nextSections,
+      updatedAt: serverTimestamp(),
+    };
+    
+    tx.update(reportRef, {
+      ...extraPayload,
+      sections: nextSections,
+      updatedAt: serverTimestamp(),
+    });
+    return nextData;
+  });
+}
+
+export function subscribeToReport(id, callback) {
+  return onSnapshot(doc(db, "serviceReports", id), (snap) => {
+    if (snap.exists()) {
+      callback({ id: snap.id, ...snap.data() });
+    } else {
+      callback(null);
+    }
   });
 }
 

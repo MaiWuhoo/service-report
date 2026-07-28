@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Camera, X, Upload } from "lucide-react";
 import YesNoToggle from "../components/YesNoToggle";
 import CameraCapture from "../components/CameraCapture";
-import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
+import ImagePreviewModal from "../components/ImagePreviewModal";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, subscribeToReport, updateReportSection } from "../lib/reportsApi";
 import { readImageFileCompressed } from "../lib/fileUtils";
 
 export default function ChecklistRunner() {
@@ -17,18 +18,26 @@ export default function ChecklistRunner() {
   const [dateOfService, setDateOfService] = useState("");
   const [saving, setSaving] = useState(false);
   const [activeCameraItemId, setActiveCameraItemId] = useState(null);
+  const [currentLoadedStep, setCurrentLoadedStep] = useState(-1);
+  const [previewImage, setPreviewImage] = useState(null);
 
   useEffect(() => {
     if (!id) return;
-    (async () => {
-      const r = await getReport(id);
+    const unsub = subscribeToReport(id, (r) => {
       setReport(r);
-      setItems(r?.sections?.[stepIndex]?.items ?? []);
-      setRemark(r?.additionalRemark ?? "");
-      setDateOfService(r?.dateOfService ?? "");
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, stepIndex]);
+    });
+    return () => unsub();
+  }, [id]);
+
+  useEffect(() => {
+    if (!report) return;
+    if (currentLoadedStep !== stepIndex) {
+      setItems(report.sections?.[stepIndex]?.items ?? []);
+      setRemark(report.additionalRemark ?? "");
+      setDateOfService(report.dateOfService ?? "");
+      setCurrentLoadedStep(stepIndex);
+    }
+  }, [report, stepIndex, currentLoadedStep]);
 
   function updateItem(itemId, patch) {
     setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, ...patch } : it)));
@@ -76,19 +85,26 @@ export default function ChecklistRunner() {
   const isLastStep = stepIndex === totalSteps - 1;
   const currentSection = report?.sections?.[stepIndex];
 
+  const hasUnsavedChanges = useMemo(() => {
+    if (!report) return false;
+    const dbItems = report.sections?.[stepIndex]?.items ?? [];
+    if (JSON.stringify(items) !== JSON.stringify(dbItems)) return true;
+    if (isLastStep && remark !== (report.additionalRemark ?? "")) return true;
+    if (dateOfService !== (report.dateOfService ?? "")) return true;
+    return false;
+  }, [report, items, remark, dateOfService, stepIndex, isLastStep]);
+
   async function persist(nextStatus) {
     if (!id || !report) return null;
     setSaving(true);
     try {
-      const nextSections = report.sections.map((s, idx) => (idx === stepIndex ? { ...s, items } : s));
       const payload = {
-        sections: nextSections,
         status: nextStatus ?? report.status ?? "draft",
         dateOfService: dateOfService || report.dateOfService,
       };
       if (isLastStep) payload.additionalRemark = remark;
-      await updateReport(id, payload);
-      setReport((prev) => ({ ...prev, ...payload }));
+      
+      const nextData = await updateReportSection(id, stepIndex, items, payload);
 
       // Propagate status into schedule entry templateSelections so UI shows instance status.
       try {
@@ -109,7 +125,7 @@ export default function ChecklistRunner() {
       } catch (err) {
         console.error("Failed to propagate report status to schedule:", err);
       }
-      return nextSections;
+      return nextData.sections;
     } catch (err) {
       console.error("Failed to save checklist:", err);
       alert(`Gagal simpan checklist: ${err.message}`);
@@ -120,12 +136,24 @@ export default function ChecklistRunner() {
   }
 
   async function handleNext() {
-    const saved = await persist("in_review");
-    if (!saved) return;
+    if (hasUnsavedChanges) {
+      const saved = await persist("in_review");
+      if (!saved) return;
+    }
     if (isLastStep) {
       navigate(`/review/${id}`);
     } else {
       navigate(`/checklist/${id}/${stepIndex + 1}`);
+    }
+  }
+
+  async function handleBack() {
+    if (hasUnsavedChanges) {
+      const saved = await persist("in_progress");
+      if (!saved) return;
+    }
+    if (stepIndex > 0) {
+      navigate(`/checklist/${id}/${stepIndex - 1}`);
     }
   }
 
@@ -222,7 +250,8 @@ export default function ChecklistRunner() {
                         <img
                           src={p}
                           alt={`Attached evidence ${pIdx + 1}`}
-                          className="h-20 w-20 rounded-md border border-border object-cover"
+                          onClick={() => setPreviewImage(p)}
+                          className="h-20 w-20 rounded-md border border-border object-cover cursor-pointer hover:opacity-80 transition-opacity"
                         />
                         <button
                           onClick={() => removePhoto(item.id, pIdx)}
@@ -274,18 +303,29 @@ export default function ChecklistRunner() {
 
       <button
         onClick={() => persist(report.status)}
-        disabled={saving}
+        disabled={saving || !hasUnsavedChanges}
         className="w-full rounded-md bg-navy-800 py-3 text-sm font-bold uppercase tracking-wide text-white hover:bg-navy-700 disabled:opacity-60"
       >
-        {saving ? "Saving…" : "Save Progress"}
+        {saving ? "Saving…" : (hasUnsavedChanges ? "Save Progress" : "No Changes to Save")}
       </button>
-      <button
-        onClick={handleNext}
-        disabled={saving}
-        className="w-full rounded-md border-2 border-navy-800 py-3 text-sm font-bold uppercase tracking-wide text-navy-800 hover:bg-navy-50 disabled:opacity-60"
-      >
-        {isLastStep ? "Next: Review & Sign-off" : `Next: ${report.sections[stepIndex + 1]?.sectionName}`}
-      </button>
+      <div className="flex gap-3">
+        {stepIndex > 0 && (
+          <button
+            onClick={handleBack}
+            disabled={saving}
+            className="flex-1 rounded-md border-2 border-border py-3 text-sm font-bold uppercase tracking-wide text-navy-800 hover:bg-surface disabled:opacity-60"
+          >
+            Previous: {report.sections[stepIndex - 1]?.sectionName}
+          </button>
+        )}
+        <button
+          onClick={handleNext}
+          disabled={saving}
+          className="flex-1 rounded-md border-2 border-navy-800 py-3 text-sm font-bold uppercase tracking-wide text-navy-800 hover:bg-navy-50 disabled:opacity-60"
+        >
+          {isLastStep ? "Next: Review & Sign-off" : `Next: ${report.sections[stepIndex + 1]?.sectionName}`}
+        </button>
+      </div>
 
       <div className="fixed bottom-20 right-4 rounded-full bg-danger-600 p-3 text-white shadow-lg md:bottom-6">
         <AlertTriangle size={20} />
@@ -298,6 +338,14 @@ export default function ChecklistRunner() {
             setActiveCameraItemId(null);
           }}
           onCancel={() => setActiveCameraItemId(null)}
+        />
+      )}
+
+      {previewImage && (
+        <ImagePreviewModal
+          src={previewImage}
+          alt="Preview"
+          onClose={() => setPreviewImage(null)}
         />
       )}
     </div>

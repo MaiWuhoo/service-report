@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, ChevronRight, ChevronDown, MapPin, Upload, X, Share2 } from "lucide-react";
-import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, subscribeToReport } from "../lib/reportsApi";
 import { generateServiceReportPDF } from "../lib/generateReport";
 import { readFileAsDataURL } from "../lib/fileUtils";
 import SignaturePad from "../components/SignaturePad";
@@ -84,12 +84,16 @@ export default function ReviewSignoff() {
 
   useEffect(() => {
     if (!id) return;
-    (async () => {
-      const r = await getReport(id);
+    let initialized = false;
+    const unsub = subscribeToReport(id, (r) => {
       setReport(r);
-      setEngineerName(r?.leadTechnician ?? "");
-      setEngineerDate(r?.engineerDate ?? new Date().toISOString().slice(0, 10));
-    })();
+      if (r && !initialized) {
+        setEngineerName(r.leadTechnician ?? "");
+        setEngineerDate(r.engineerDate ?? new Date().toISOString().slice(0, 10));
+        initialized = true;
+      }
+    });
+    return () => unsub();
   }, [id]);
 
   function clearCanvas(ref) {
