@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, ChevronRight, ChevronDown, MapPin, Upload, X, Share2 } from "lucide-react";
-import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, subscribeToReport } from "../lib/reportsApi";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, subscribeToReport, getEngineerSignatures, saveEngineerSignatures } from "../lib/reportsApi";
 import { generateServiceReportPDF } from "../lib/generateReport";
 import { readFileAsDataURL } from "../lib/fileUtils";
 import SignaturePad from "../components/SignaturePad";
@@ -26,6 +26,13 @@ export default function ReviewSignoff() {
   const [copied, setCopied] = useState(false);
   const [savingEngineerDate, setSavingEngineerDate] = useState(false);
   const [engineerDateMessage, setEngineerDateMessage] = useState("");
+  const [savingEngineerSign, setSavingEngineerSign] = useState(false);
+  const [engineerSignMessage, setEngineerSignMessage] = useState("");
+  const [savedEngineerSignatures, setSavedEngineerSignatures] = useState([]);
+  const [activeSignatureId, setActiveSignatureId] = useState(null);
+  const [selectedSignatureDataUrl, setSelectedSignatureDataUrl] = useState(null);
+  const [editingSignatureId, setEditingSignatureId] = useState(null);
+  const [editingSignatureName, setEditingSignatureName] = useState("");
   const [previewReport, setPreviewReport] = useState(null);
   const [expandedSections, setExpandedSections] = useState([]);
   const [previewImage, setPreviewImage] = useState(null);
@@ -88,7 +95,7 @@ export default function ReviewSignoff() {
     const unsub = subscribeToReport(id, (r) => {
       setReport(r);
       if (r && !initialized) {
-        setEngineerName(r.leadTechnician ?? "");
+        setEngineerName(r.engineerName ?? r.leadTechnician ?? "");
         setEngineerDate(r.engineerDate ?? new Date().toISOString().slice(0, 10));
         initialized = true;
       }
@@ -96,9 +103,74 @@ export default function ReviewSignoff() {
     return () => unsub();
   }, [id]);
 
+  useEffect(() => {
+    async function loadShared() {
+      try {
+        const list = await getEngineerSignatures();
+        setSavedEngineerSignatures(list || []);
+        if (list?.length > 0 && !report?.engineerSignature) {
+          setActiveSignatureId(list[0].id);
+        }
+      } catch (err) {
+        console.error("Failed to load shared signatures:", err);
+      }
+    }
+    loadShared();
+  }, [id]);
+
   function clearCanvas(ref) {
     const canvas = ref.current;
     canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function selectEngineerSignature(signature) {
+    setEngineerName(signature.name);
+    setEngineerDate(signature.date ?? engineerDate);
+    setActiveSignatureId(signature.id);
+    setSelectedSignatureDataUrl(signature.signature);
+    setReport((prev) => ({ ...prev, engineerName: signature.name, engineerSignature: signature.signature }));
+  }
+
+  async function saveEngineerSign() {
+    if (!id || !report) return;
+    setSavingEngineerSign(true);
+    setEngineerSignMessage("");
+    const engineerSignature = engineerCanvasRef.current?.toDataURL("image/png");
+    if (!engineerName?.trim()) {
+      alert("Please enter the engineer's name before saving the signature.");
+      setSavingEngineerSign(false);
+      return;
+    }
+    if (!engineerSignature) {
+      alert("Please sign in the signature box before saving.");
+      setSavingEngineerSign(false);
+      return;
+    }
+
+    const newSignature = {
+      id: crypto?.randomUUID?.() ?? `sig-${Date.now()}`,
+      name: engineerName.trim(),
+      signature: engineerSignature,
+      date: engineerDate,
+    };
+
+    const nextShared = [...savedEngineerSignatures, newSignature];
+
+    try {
+      await Promise.all([
+        updateReport(id, { engineerName, engineerSignature, engineerDate }),
+        saveEngineerSignatures(nextShared),
+      ]);
+      setReport((prev) => ({ ...prev, engineerName, engineerSignature, engineerDate }));
+      setSavedEngineerSignatures(nextShared);
+      setActiveSignatureId(newSignature.id);
+      setSelectedSignatureDataUrl(newSignature.signature);
+      setEngineerSignMessage("Engineer sign saved successfully.");
+    } catch (err) {
+      alert(`Failed to save engineer signature: ${err.message}`);
+    } finally {
+      setSavingEngineerSign(false);
+    }
   }
 
   async function approve() {
@@ -506,7 +578,97 @@ export default function ReviewSignoff() {
             onNameChange={setEngineerName}
             canvasRef={engineerCanvasRef}
             onClear={() => clearCanvas(engineerCanvasRef)}
+            signatureDataUrl={selectedSignatureDataUrl ?? report.engineerSignature ?? null}
           />
+
+          <div className="mt-3">
+            <p className="mb-2 text-xs font-semibold text-muted">Saved Signatures</p>
+            <div className="flex flex-wrap gap-2">
+              {savedEngineerSignatures.length === 0 ? (
+                <div className="text-xs text-muted">No saved signatures yet.</div>
+              ) : (
+                savedEngineerSignatures.map((s) => (
+                  <div key={s.id} className="flex items-center gap-2">
+                    {editingSignatureId === s.id ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={editingSignatureName}
+                          onChange={(e) => setEditingSignatureName(e.target.value)}
+                          className="rounded-md border border-border bg-white px-2 py-1 text-xs"
+                        />
+                        <button
+                          onClick={async () => {
+                            const next = savedEngineerSignatures.map((sig) => sig.id === s.id ? { ...sig, name: editingSignatureName } : sig);
+                            try {
+                              await saveEngineerSignatures(next);
+                              setSavedEngineerSignatures(next);
+                              setEditingSignatureId(null);
+                            } catch (err) {
+                              alert(`Failed to update signature: ${err.message}`);
+                            }
+                          }}
+                          className="rounded-md bg-teal-600 px-2 py-1 text-xs font-semibold text-white"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingSignatureId(null)}
+                          className="rounded-md border px-2 py-1 text-xs"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => selectEngineerSignature(s)}
+                          className={`rounded-md border px-3 py-1 text-xs ${activeSignatureId === s.id ? 'bg-navy-800 text-white' : 'bg-surface text-ink'}`}
+                        >
+                          {s.name}
+                        </button>
+                        <button
+                          onClick={() => { setEditingSignatureId(s.id); setEditingSignatureName(s.name); }}
+                          className="rounded-md border px-2 py-1 text-xs"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Remove saved signature "${s.name}"?`)) return;
+                            const next = savedEngineerSignatures.filter((sig) => sig.id !== s.id);
+                            try {
+                              await saveEngineerSignatures(next);
+                              setSavedEngineerSignatures(next);
+                              if (activeSignatureId === s.id) {
+                                setActiveSignatureId(null);
+                                setSelectedSignatureDataUrl(null);
+                              }
+                            } catch (err) {
+                              alert(`Failed to remove signature: ${err.message}`);
+                            }
+                          }}
+                          className="rounded-md border px-2 py-1 text-xs text-danger-600"
+                        >
+                          Remove
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                onClick={saveEngineerSign}
+                disabled={savingEngineerSign}
+                className="rounded-md bg-teal-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+              >
+                {savingEngineerSign ? 'Saving…' : 'Save Engineer Sign'}
+              </button>
+              {engineerSignMessage && <p className="text-xs text-teal-600">{engineerSignMessage}</p>}
+            </div>
+          </div>
 
           <div>
             <label className="mb-1 block text-sm font-semibold text-ink">Digital COP (Company Stamp)</label>

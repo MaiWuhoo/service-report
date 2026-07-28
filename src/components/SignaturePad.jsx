@@ -1,11 +1,26 @@
 import { useRef, useEffect } from "react";
 
-export default function SignaturePad({ label, name, onNameChange, canvasRef, onClear }) {
+export default function SignaturePad({ label, name, onNameChange, canvasRef, onClear, signatureDataUrl }) {
   const drawing = useRef(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    // clear first
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // if an existing signature image is provided, draw it onto the canvas
+    if (signatureDataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        } catch (e) {
+          // ignore drawing errors
+        }
+      };
+      img.src = signatureDataUrl;
+    }
 
     const handleTouchStart = (e) => {
       e.preventDefault();
@@ -74,7 +89,7 @@ export default function SignaturePad({ label, name, onNameChange, canvasRef, onC
       canvas.removeEventListener("mouseup", handleMouseUp);
       canvas.removeEventListener("mouseleave", handleMouseUp);
     };
-  }, [canvasRef]);
+  }, [canvasRef, signatureDataUrl]);
 
   return (
     <div className="rounded-lg border border-border p-4">
