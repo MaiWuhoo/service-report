@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_Z3EkJ8JXvLBJ8hfiwm1SDWSIvBYx",
+      "name": "service-report",
+      "directory": ".",
+      "orgId": "team_HYrHpzHgR1UJtJXJOBVVNetp"
+    }
+  ]
+}

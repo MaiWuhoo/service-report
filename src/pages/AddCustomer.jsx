@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Save, ImagePlus, X } from "lucide-react";
 import { createCustomer, getCustomer, updateCustomer } from "../lib/reportsApi";
-import { readFileAsDataURL } from "../lib/fileUtils";
+import { compressImageToBlob } from "../lib/fileUtils";
+import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 
 export default function AddCustomer() {
   const navigate = useNavigate();
@@ -14,6 +15,7 @@ export default function AddCustomer() {
   const [logo, setLogo] = useState(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEditing);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   useEffect(() => {
     if (!isEditing) return;
@@ -31,10 +33,18 @@ export default function AddCustomer() {
   async function handleLogoChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadingLogo(true);
     try {
-      setLogo(await readFileAsDataURL(file));
+      const blob = await compressImageToBlob(file, 600, 0.85);
+      const url = await uploadImageToCloudinary(
+        `customers/logo-${Date.now()}`,
+        blob,
+      );
+      setLogo(url);
     } catch (err) {
       alert(`Gagal muat naik logo: ${err.message}`);
+    } finally {
+      setUploadingLogo(false);
     }
   }
 
@@ -67,14 +77,19 @@ export default function AddCustomer() {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-2xl font-extrabold text-ink">{isEditing ? "Edit Customer" : "New Customer"}</h2>
+        <h2 className="text-2xl font-extrabold text-ink">
+          {isEditing ? "Edit Customer" : "New Customer"}
+        </h2>
         <p className="text-sm text-muted">
-          This record can be reused across as many checklist templates as you like.
+          This record can be reused across as many checklist templates as you
+          like.
         </p>
       </div>
 
       <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <label className="mb-1 block text-sm font-semibold text-ink">Customer Name</label>
+        <label className="mb-1 block text-sm font-semibold text-ink">
+          Customer Name
+        </label>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -82,7 +97,9 @@ export default function AddCustomer() {
           className="mb-4 w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
         />
 
-        <label className="mb-1 block text-sm font-semibold text-ink">Address</label>
+        <label className="mb-1 block text-sm font-semibold text-ink">
+          Address
+        </label>
         <textarea
           value={address}
           onChange={(e) => setAddress(e.target.value)}
@@ -91,7 +108,9 @@ export default function AddCustomer() {
           className="mb-4 w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
         />
 
-        <label className="mb-1 block text-sm font-semibold text-ink">Logo</label>
+        <label className="mb-1 block text-sm font-semibold text-ink">
+          Logo
+        </label>
         {logo ? (
           <div className="flex items-center gap-3">
             <img
@@ -109,9 +128,17 @@ export default function AddCustomer() {
         ) : (
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed border-border py-6 text-center hover:bg-surface">
             <ImagePlus size={20} className="mb-2 text-navy-700" />
-            <span className="text-sm font-semibold text-navy-700">Upload Logo</span>
+            <span className="text-sm font-semibold text-navy-700">
+              {uploadingLogo ? "Uploading…" : "Upload Logo"}
+            </span>
             <span className="text-xs text-muted">PNG or JPG</span>
-            <input type="file" accept="image/png,image/jpeg" onChange={handleLogoChange} className="hidden" />
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={handleLogoChange}
+              disabled={uploadingLogo}
+              className="hidden"
+            />
           </label>
         )}
       </section>

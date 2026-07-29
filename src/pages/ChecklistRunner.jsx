@@ -5,7 +5,8 @@ import YesNoToggle from "../components/YesNoToggle";
 import CameraCapture from "../components/CameraCapture";
 import ImagePreviewModal from "../components/ImagePreviewModal";
 import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, subscribeToReport, updateReportSection } from "../lib/reportsApi";
-import { readImageFileCompressed } from "../lib/fileUtils";
+import { compressImageToBlob } from "../lib/fileUtils";
+import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 
 export default function ChecklistRunner() {
   const { id, step } = useParams();
@@ -20,6 +21,7 @@ export default function ChecklistRunner() {
   const [activeCameraItemId, setActiveCameraItemId] = useState(null);
   const [currentLoadedStep, setCurrentLoadedStep] = useState(-1);
   const [previewImage, setPreviewImage] = useState(null);
+  const [uploadingItemId, setUploadingItemId] = useState(null);
 
   useEffect(() => {
     if (!id) return;
@@ -45,22 +47,37 @@ export default function ChecklistRunner() {
 
   async function handleFile(itemId, file) {
     if (!file) return;
+
+    const targetItem = items.find((it) => it.id === itemId);
+    const currentPhotos = targetItem?.photos || (targetItem?.photo ? [targetItem.photo] : []);
+    if (currentPhotos.length >= 3) {
+      alert("Maximum 3 photos allowed.");
+      return;
+    }
+
+    setUploadingItemId(itemId);
     try {
-      const compressed = await readImageFileCompressed(file);
-      setItems((prev) => prev.map((it) => {
-        if (it.id === itemId) {
-          const currentPhotos = it.photos || (it.photo ? [it.photo] : []);
-          if (currentPhotos.length >= 3) {
-            alert("Maximum 3 photos allowed.");
-            return it;
+      // Compress client-side, then upload to Cloudinary — storing the photo
+      // as base64 directly in the Firestore document blows past its 1 MiB
+      // per-document hard limit once a few photos are attached.
+      const blob = await compressImageToBlob(file);
+      const publicId = `reports/${id}/${itemId}-${Date.now()}`;
+      const url = await uploadImageToCloudinary(publicId, blob);
+
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id === itemId) {
+            const cur = it.photos || (it.photo ? [it.photo] : []);
+            const nextPhotos = [...cur, url];
+            return { ...it, photos: nextPhotos, photo: nextPhotos[0] || null };
           }
-          const nextPhotos = [...currentPhotos, compressed];
-          return { ...it, photos: nextPhotos, photo: nextPhotos[0] || null };
-        }
-        return it;
-      }));
+          return it;
+        })
+      );
     } catch (err) {
       alert(`Gagal muat naik gambar: ${err.message}`);
+    } finally {
+      setUploadingItemId(null);
     }
   }
 
@@ -241,6 +258,7 @@ export default function ChecklistRunner() {
 
           {(() => {
             const currentPhotos = item.photos || (item.photo ? [item.photo] : []);
+            const isUploading = uploadingItemId === item.id;
             return (
               <>
                 {currentPhotos.length > 0 && (
@@ -267,15 +285,17 @@ export default function ChecklistRunner() {
                   <div className="mt-3 flex gap-2">
                     <button
                       onClick={() => setActiveCameraItemId(item.id)}
-                      className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface"
+                      disabled={isUploading}
+                      className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface disabled:opacity-60"
                     >
-                      <Camera size={16} /> Camera
+                      <Camera size={16} /> {isUploading ? "Uploading…" : "Camera"}
                     </button>
                     <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-border py-2.5 text-sm font-semibold text-navy-700 hover:bg-surface">
-                      <Upload size={16} /> Gallery
+                      <Upload size={16} /> {isUploading ? "Uploading…" : "Gallery"}
                       <input
                         type="file"
                         accept="image/*"
+                        disabled={isUploading}
                         onChange={(e) => handlePhotoChange(item.id, e)}
                         className="hidden"
                       />
