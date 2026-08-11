@@ -371,7 +371,23 @@ export function getReportPDFBlobUrl(report, options = {}) {
   return buildReportDoc(report, options).output("bloburl");
 }
 
+export function getReportPDFFilename(report) {
+  const title = report.templateName || "Service Report";
+  const location = report.locationDoor || "";
+  const date = report.dateOfService || "";
+  let filename = title;
+  if (location) filename += ` - ${location}`;
+  if (date) filename += ` - ${date}`;
+  filename += ".pdf";
+  return filename;
+}
+
+export function getReportPDFArrayBuffer(report, options = {}) {
+  return buildReportDoc(report, options).output("arraybuffer");
+}
+
 export function generateServiceReportPDF(report, options = {}) {
   const doc = buildReportDoc(report, options);
-  doc.save(`${report.reportId ?? "service-report"}.pdf`);
+  const filename = getReportPDFFilename(report);
+  doc.save(filename);
 }

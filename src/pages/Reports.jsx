@@ -170,8 +170,24 @@ export default function Reports() {
                 <p className="truncate text-sm text-muted">
                   {r.locationDoor} • {r.dateOfService} • {r.leadTechnician}
                 </p>
+                <div className="mt-1 flex flex-wrap gap-2 text-xs">
+                  <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium ${
+                    r.engineerSignature 
+                      ? "bg-teal-50 text-teal-700 border border-teal-200" 
+                      : "bg-amber-50 text-amber-700 border border-amber-200"
+                  }`}>
+                    Tech: {r.engineerSignature ? "Signed ✓" : "Pending ⏳"}
+                  </span>
+                  <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium ${
+                    r.managerSignature 
+                      ? "bg-teal-50 text-teal-700 border border-teal-200" 
+                      : "bg-amber-50 text-amber-700 border border-amber-200"
+                  }`}>
+                    Customer: {r.managerSignature ? "Signed ✓" : "Pending ⏳"}
+                  </span>
+                </div>
                 {copiedId === r.id && (
-                  <p className="text-[11px] font-semibold text-teal-600">
+                  <p className="text-[11px] font-semibold text-teal-600 mt-1">
                     Link copied ✓
                   </p>
                 )}

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { CheckCircle2, MapPin, Eye, ChevronDown, ChevronRight, Upload, X } from "lucide-react";
+import { CheckCircle2, MapPin, Eye, ChevronDown, ChevronRight, Upload, X, Download } from "lucide-react";
 import { getReport, updateReport } from "../lib/reportsApi";
 import { readFileAsDataURL } from "../lib/fileUtils";
 import SignaturePad from "../components/SignaturePad";
 import PDFPreviewModal from "../components/PDFPreviewModal";
 import ImagePreviewModal from "../components/ImagePreviewModal";
+import { generateServiceReportPDF } from "../lib/generateReport";
 
 function sectionSummary(section) {
   if (!section) return { checked: 0, remarks: 0 };
@@ -117,6 +118,12 @@ export default function CustomerSign() {
 
       <main className="mx-auto max-w-xl space-y-4 px-4 py-5">
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          {report.templateName && (
+            <>
+              <p className="text-xs font-semibold uppercase text-muted">Project Name</p>
+              <div className="mb-3 font-bold text-navy-800 text-lg">{report.templateName}</div>
+            </>
+          )}
           <p className="text-xs font-semibold uppercase text-muted">Report ID</p>
           <div className="mb-3 rounded-md bg-surface px-3 py-2 text-sm font-semibold">{report.reportId}</div>
           <p className="text-xs font-semibold uppercase text-muted">Inspection Date</p>
@@ -204,7 +211,7 @@ export default function CustomerSign() {
           onClick={() => setPreviewReport(report)}
           className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-navy-800 py-3 text-sm font-bold text-navy-800 hover:bg-navy-50"
         >
-          <Eye size={16} /> Preview Full Report (PDF)
+          <Eye size={16} /> Preview & Download PDF
         </button>
 
         {alreadySigned || justSigned ? (
@@ -214,16 +221,25 @@ export default function CustomerSign() {
             <p className="mt-1 text-sm text-muted">
               Signed by {report.reviewedBy} on {report.reviewDate}
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                setJustSigned(false);
-                setReport(prev => ({ ...prev, managerSignature: null }));
-              }}
-              className="mt-4 w-full rounded-md border-2 border-navy-800 py-2 text-sm font-bold text-navy-800 hover:bg-navy-50"
-            >
-              Correct Signature
-            </button>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => setPreviewReport(report)}
+                className="flex-1 flex items-center justify-center gap-2 rounded-md bg-teal-600 py-2.5 text-sm font-bold text-white hover:bg-teal-700"
+              >
+                <Eye size={16} /> Preview & Download PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setJustSigned(false);
+                  setReport(prev => ({ ...prev, managerSignature: null }));
+                }}
+                className="flex-1 rounded-md border border-teal-600 py-2.5 text-sm font-bold text-teal-700 hover:bg-teal-100/50"
+              >
+                Correct Signature
+              </button>
+            </div>
           </section>
         ) : (
           <section className="rounded-xl border border-border bg-card p-5 shadow-sm">

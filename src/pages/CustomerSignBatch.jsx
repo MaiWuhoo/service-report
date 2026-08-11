@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { CheckCircle2, MapPin, ChevronDown, ChevronRight } from "lucide-react";
+import { CheckCircle2, MapPin, ChevronDown, ChevronRight, Download, Eye } from "lucide-react";
 import { getReport, updateReport } from "../lib/reportsApi";
 import SignaturePad from "../components/SignaturePad";
+import { generateServiceReportPDF, getReportPDFArrayBuffer, getReportPDFFilename } from "../lib/generateReport";
+import PDFPreviewModal from "../components/PDFPreviewModal";
 
 function sectionSummary(section) {
   if (!section) return { checked: 0, remarks: 0 };
@@ -24,6 +26,36 @@ export default function CustomerSignBatch() {
   const canvasRef = useRef(null);
   const [submitting, setSubmitting] = useState(false);
   const [justSigned, setJustSigned] = useState(false);
+  const [previewReport, setPreviewReport] = useState(null);
+
+  async function downloadAllPDFs() {
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+
+      for (const report of reports) {
+        const folderName = report.templateName || "Service Reports";
+        const filename = getReportPDFFilename(report);
+        const pdfBytes = getReportPDFArrayBuffer(report);
+        
+        // Put the PDF in the folder corresponding to the project name
+        zip.folder(folderName).file(filename, pdfBytes);
+      }
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Service_Reports_${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to generate zip file:", err);
+      alert(`Gagal memuat turun fail ZIP: ${err.message}`);
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -123,16 +155,33 @@ export default function CustomerSignBatch() {
       </header>
 
       <main className="mx-auto max-w-xl space-y-4 px-4 py-5">
+        {reports.length > 1 && (
+          <button
+            type="button"
+            onClick={downloadAllPDFs}
+            className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-navy-800 py-2.5 text-sm font-bold text-navy-800 hover:bg-navy-50"
+          >
+            <Download size={16} /> Download All PDFs ({reports.length})
+          </button>
+        )}
+
         {reports.map((report) => (
           <section
             key={report.id}
             className="rounded-xl border border-border bg-card shadow-sm"
           >
             <div className="border-b border-border px-5 py-3">
-              <p className="text-xs font-semibold uppercase text-muted">
-                {report.reportId}
-              </p>
-              <p className="flex items-center gap-1 font-bold text-ink">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase text-muted">
+                  {report.reportId}
+                </p>
+                {report.templateName && (
+                  <span className="rounded bg-navy-50 px-2 py-0.5 text-xs font-bold text-navy-800">
+                    {report.templateName}
+                  </span>
+                )}
+              </div>
+              <p className="flex items-center gap-1 font-bold text-ink mt-1">
                 <MapPin size={14} className="text-navy-700" />{" "}
                 {report.locationDoor}
                 <span className="ml-auto text-xs font-normal text-muted">
@@ -220,16 +269,35 @@ export default function CustomerSignBatch() {
             <p className="mt-1 text-sm text-muted">
               Signed by {reports[0]?.reviewedBy} on {reports[0]?.reviewDate}
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                setJustSigned(false);
-                setReports((prev) => prev.map((r) => ({ ...r, managerSignature: null })));
-              }}
-              className="mt-4 w-full rounded-md border-2 border-navy-800 py-2 text-sm font-bold text-navy-800 hover:bg-navy-50"
-            >
-              Correct Signature
-            </button>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              {reports.length === 1 ? (
+                <button
+                  type="button"
+                  onClick={() => setPreviewReport(reports[0])}
+                  className="flex-1 flex items-center justify-center gap-2 rounded-md bg-teal-600 py-2.5 text-sm font-bold text-white hover:bg-teal-700"
+                >
+                  <Eye size={16} /> Preview & Download PDF
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={downloadAllPDFs}
+                  className="flex-1 flex items-center justify-center gap-2 rounded-md bg-teal-600 py-2.5 text-sm font-bold text-white hover:bg-teal-700"
+                >
+                  <Download size={16} /> Download All PDFs
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setJustSigned(false);
+                  setReports((prev) => prev.map((r) => ({ ...r, managerSignature: null })));
+                }}
+                className="flex-1 rounded-md border border-teal-600 py-2.5 text-sm font-bold text-teal-700 hover:bg-teal-100/50"
+              >
+                Correct Signature
+              </button>
+            </div>
           </section>
         ) : (
           <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -260,6 +328,13 @@ export default function CustomerSignBatch() {
           </section>
         )}
       </main>
+
+      {previewReport && (
+        <PDFPreviewModal
+          report={previewReport}
+          onClose={() => setPreviewReport(null)}
+        />
+      )}
     </div>
   );
 }
