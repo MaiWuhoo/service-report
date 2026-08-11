@@ -6,6 +6,90 @@ const PAGE_W = 210; // A4 mm
 const MARGIN = 12;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
+function isRemoteUrl(str) {
+  return typeof str === "string" && /^https?:\/\//i.test(str);
+}
+
+async function urlToDataURL(url) {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Failed to load image"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * jsPDF's addImage needs actual image data (a data URL, canvas, or
+ * Uint8Array) — it can't fetch a remote URL itself. Photos/logos/stamps are
+ * stored in Cloudinary (to stay under Firestore's 1 MiB per-doc limit), so
+ * before generating a PDF we resolve every remote URL in the report down to
+ * a data URL. Anything already a data URL (e.g. canvas signatures) is left
+ * untouched.
+ */
+async function resolveReportImages(report) {
+  const resolved = { ...report };
+
+  async function resolveInto(obj, key) {
+    if (obj && isRemoteUrl(obj[key])) {
+      try {
+        obj[key] = await urlToDataURL(obj[key]);
+      } catch {
+        // leave the remote URL — the draw functions already no-op on failure
+      }
+    }
+  }
+
+  if (resolved.serviceProvider) {
+    resolved.serviceProvider = { ...resolved.serviceProvider };
+    await resolveInto(resolved.serviceProvider, "logo");
+  }
+  if (resolved.customer) {
+    resolved.customer = { ...resolved.customer };
+    await resolveInto(resolved.customer, "logo");
+  }
+  await resolveInto(resolved, "companyStamp");
+  await resolveInto(resolved, "engineerSignature");
+  await resolveInto(resolved, "managerSignature");
+
+  if (resolved.sections) {
+    resolved.sections = await Promise.all(
+      resolved.sections.map(async (section) => ({
+        ...section,
+        items: await Promise.all(
+          (section.items ?? []).map(async (item) => {
+            const next = { ...item };
+            if (isRemoteUrl(next.photo)) {
+              try {
+                next.photo = await urlToDataURL(next.photo);
+              } catch {
+                // leave as-is
+              }
+            }
+            if (Array.isArray(next.photos) && next.photos.length) {
+              next.photos = await Promise.all(
+                next.photos.map(async (p) => {
+                  if (!isRemoteUrl(p)) return p;
+                  try {
+                    return await urlToDataURL(p);
+                  } catch {
+                    return p;
+                  }
+                }),
+              );
+            }
+            return next;
+          }),
+        ),
+      })),
+    );
+  }
+
+  return resolved;
+}
+
 function drawLogo(doc, dataUrl, x, y, maxSize) {
   try {
     const props = doc.getImageProperties(dataUrl);
@@ -15,7 +99,14 @@ function drawLogo(doc, dataUrl, x, y, maxSize) {
     doc.addImage(dataUrl, imageFormatFromDataUrl(dataUrl), x, y, width, height);
     return { width, height };
   } catch {
-    doc.addImage(dataUrl, imageFormatFromDataUrl(dataUrl), x, y, maxSize, maxSize);
+    doc.addImage(
+      dataUrl,
+      imageFormatFromDataUrl(dataUrl),
+      x,
+      y,
+      maxSize,
+      maxSize,
+    );
     return { width: maxSize, height: maxSize };
   }
 }
@@ -64,14 +155,26 @@ function drawHeaderBox(doc, report, y) {
 
   if (report.serviceProvider?.logo) {
     try {
-      drawLogo(doc, report.serviceProvider.logo, providerLogoX, y + logoOffset, logoSize);
+      drawLogo(
+        doc,
+        report.serviceProvider.logo,
+        providerLogoX,
+        y + logoOffset,
+        logoSize,
+      );
     } catch {
       // ignore malformed image data
     }
   }
   if (report.customer?.logo) {
     try {
-      drawLogo(doc, report.customer.logo, customerLogoX, y + logoOffset, logoSize);
+      drawLogo(
+        doc,
+        report.customer.logo,
+        customerLogoX,
+        y + logoOffset,
+        logoSize,
+      );
     } catch {
       // ignore malformed image data
     }
@@ -214,7 +317,10 @@ function drawSignatureBlock(
   doc.text(`Date: ${dateStr || "-"}`, x + 2, y + h - 2);
 }
 
-/** Builds the jsPDF document without saving it — used for both download and preview. */
+/** Builds the jsPDF document without saving it — used for both download and
+ *  preview. NOTE: `report` should already have Cloudinary/remote URLs
+ *  resolved to data URLs (see resolveReportImages) — call this via
+ *  getReportPDFBlobUrl / generateServiceReportPDF rather than directly. */
 export function buildReportDoc(report, options = {}) {
   const { spacing = "normal" } = options;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
@@ -230,8 +336,7 @@ export function buildReportDoc(report, options = {}) {
   doc.setFontSize(12);
   doc.setTextColor(10, 10, 10);
   doc.text(
-    `PREVENTIVE MAINTENANCE SERVICE REPORT${
-      report.templateName ? ` - ${report.templateName.toUpperCase()}` : ""
+    `PREVENTIVE MAINTENANCE SERVICE REPORT${report.templateName ? ` - ${report.templateName.toUpperCase()}` : ""
     }`,
     PAGE_W / 2,
     y,
@@ -282,7 +387,11 @@ export function buildReportDoc(report, options = {}) {
       3: { cellWidth: 52, valign: "top" },
     },
     didParseCell: (data) => {
-      if (data.section === "body" && data.column.index === 3 && photoByRow.has(data.row.index)) {
+      if (
+        data.section === "body" &&
+        data.column.index === 3 &&
+        photoByRow.has(data.row.index)
+      ) {
         const photos = photoByRow.get(data.row.index) || [];
         const extraHeight = photos.length * (THUMB + 2);
         data.cell.styles.minCellHeight = Math.max(
@@ -366,9 +475,12 @@ export function buildReportDoc(report, options = {}) {
 }
 
 /** Returns a blob URL suitable for <iframe src> preview. Caller should
- *  URL.revokeObjectURL(url) when done with it (e.g. on unmount). */
-export function getReportPDFBlobUrl(report, options = {}) {
-  return buildReportDoc(report, options).output("bloburl");
+ *  URL.revokeObjectURL(url) when done with it (e.g. on unmount).
+ *  Now async — it resolves any Cloudinary/remote URLs (photos/logos/stamp)
+ *  to data URLs before jsPDF tries to embed them. */
+export async function getReportPDFBlobUrl(report, options = {}) {
+  const resolved = await resolveReportImages(report);
+  return buildReportDoc(resolved, options).output("bloburl");
 }
 
 export function getReportPDFFilename(report) {
@@ -388,6 +500,5 @@ export function getReportPDFArrayBuffer(report, options = {}) {
 
 export function generateServiceReportPDF(report, options = {}) {
   const doc = buildReportDoc(report, options);
-  const filename = getReportPDFFilename(report);
-  doc.save(filename);
+  doc.save(`${report.reportId ?? "service-report"}.pdf`);
 }
