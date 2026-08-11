@@ -24,6 +24,29 @@ export default function Reports() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [batchCopied, setBatchCopied] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const sortedReports = [...reports].sort((a, b) => {
+    const projectA = (a.templateName ?? "").toLowerCase();
+    const projectB = (b.templateName ?? "").toLowerCase();
+    if (projectA < projectB) return -1;
+    if (projectA > projectB) return 1;
+    return (b.dateOfService ?? "").localeCompare(a.dateOfService ?? "");
+  });
+
+  const filteredReports = sortedReports.filter((r) => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return [r.templateName, r.locationDoor, r.leadTechnician]
+      .some((value) => value?.toLowerCase().includes(query));
+  });
+
+  const reportGroups = filteredReports.reduce((acc, report) => {
+    const key = report.templateName || "Untitled Project";
+    acc[key] = acc[key] || [];
+    acc[key].push(report);
+    return acc;
+  }, {});
 
   async function load() {
     try {
@@ -115,23 +138,31 @@ export default function Reports() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <h2 className="text-2xl font-extrabold text-ink">All Reports</h2>
-        {selectMode ? (
-          <button
-            onClick={exitSelectMode}
-            className="flex items-center gap-1 text-sm font-semibold text-muted hover:text-ink"
-          >
-            <X size={15} /> Cancel
-          </button>
-        ) : (
-          <button
-            onClick={() => setSelectMode(true)}
-            className="flex items-center gap-1 text-sm font-semibold text-navy-700 hover:underline"
-          >
-            <CheckSquare size={15} /> Select multiple
-          </button>
-        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by project name, location, or technician"
+            className="w-full rounded-md border border-border bg-white px-3 py-2.5 text-sm shadow-sm sm:w-80"
+          />
+          {selectMode ? (
+            <button
+              onClick={exitSelectMode}
+              className="flex items-center gap-1 rounded-md bg-navy-800 px-3 py-2.5 text-sm font-semibold text-white hover:bg-navy-700"
+            >
+              <X size={15} /> Cancel
+            </button>
+          ) : (
+            <button
+              onClick={() => setSelectMode(true)}
+              className="flex items-center gap-1 rounded-md border border-navy-800 bg-white px-3 py-2.5 text-sm font-semibold text-navy-700 hover:bg-navy-50"
+            >
+              <CheckSquare size={15} /> Select multiple
+            </button>
+          )}
+        </div>
       </div>
 
       {selectMode && (
@@ -157,15 +188,26 @@ export default function Reports() {
         {loading && (
           <p className="px-5 py-6 text-center text-muted">Loading…</p>
         )}
-        {!loading && reports.length === 0 && (
-          <p className="px-5 py-6 text-center text-muted">No reports yet.</p>
-        )}
         <div className="divide-y divide-border">
-          {reports.map((r) => (
-            <div
-              key={r.id}
-              className="flex items-center justify-between gap-3 px-5 py-4"
-            >
+          {Object.keys(reportGroups).length === 0 && !loading && (
+            <p className="px-5 py-6 text-center text-muted">
+              {reports.length === 0
+                ? "No reports yet."
+                : "No reports match your search."}
+            </p>
+          )}
+          {Object.entries(reportGroups).map(([projectName, group]) => (
+            <div key={projectName} className="border-b border-border">
+              <div className="bg-surface px-5 py-3">
+                <p className="text-sm font-semibold uppercase tracking-wide text-navy-700">
+                  {projectName}
+                </p>
+              </div>
+              {group.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex items-center justify-between gap-3 px-5 py-4"
+                >
               {selectMode && (
                 <button
                   onClick={() => toggleSelect(r.id)}
@@ -252,6 +294,8 @@ export default function Reports() {
                   </button>
                 </>
               )}
+            </div>
+          ))}
             </div>
           ))}
         </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Plus,
+  FilePlus2,
   MapPin,
   Trash2,
   Pencil,
@@ -82,12 +83,20 @@ export default function ChecklistTemplates() {
             checklists.
           </p>
         </div>
-        <button
-          onClick={() => navigate("/checklist-templates/new")}
-          className="flex shrink-0 items-center gap-2 rounded-md bg-navy-800 px-4 py-2.5 text-sm font-bold text-white hover:bg-navy-700"
-        >
-          <Plus size={16} /> New
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => navigate("/checklist-templates/new")}
+            className="flex shrink-0 items-center gap-2 rounded-md bg-navy-800 px-4 py-2.5 text-sm font-bold text-white hover:bg-navy-700"
+          >
+            <Plus size={16} /> New
+          </button>
+          <button
+            onClick={() => navigate("/checklist-templates/import")}
+            className="flex shrink-0 items-center gap-2 rounded-md border border-border bg-white px-4 py-2.5 text-sm font-semibold text-navy-800 hover:bg-surface"
+          >
+            <FilePlus2 size={16} /> Import PDF
+          </button>
+        </div>
       </div>
 
       {loading && <p className="py-6 text-center text-muted">Loading…</p>}

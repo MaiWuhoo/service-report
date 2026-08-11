@@ -7,6 +7,7 @@ import ImagePreviewModal from "../components/ImagePreviewModal";
 import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, subscribeToReport, updateReportSection } from "../lib/reportsApi";
 import { compressImageToBlob } from "../lib/fileUtils";
 import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
+import { recordReportMedia } from "../lib/reportMedia";
 
 export default function ChecklistRunner() {
   const { id, step } = useParams();
@@ -63,6 +64,11 @@ export default function ChecklistRunner() {
       const blob = await compressImageToBlob(file);
       const publicId = `reports/${id}/${itemId}-${Date.now()}`;
       const url = await uploadImageToCloudinary(publicId, blob);
+      await recordReportMedia(report, url, {
+        itemId,
+        sectionId: currentSection?.id,
+        sectionName: currentSection?.sectionName,
+      });
 
       setItems((prev) =>
         prev.map((it) => {

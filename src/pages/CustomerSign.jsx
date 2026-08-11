@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, MapPin, Eye, ChevronDown, ChevronRight, Upload, X, Download } from "lucide-react";
-import { getReport, updateReport } from "../lib/reportsApi";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
 import { readFileAsDataURL } from "../lib/fileUtils";
 import SignaturePad from "../components/SignaturePad";
 import PDFPreviewModal from "../components/PDFPreviewModal";
@@ -66,8 +66,32 @@ export default function CustomerSign() {
         managerSignature: dataUrl,
         reviewDate: new Date().toISOString().slice(0, 10),
         companyStamp,
+        status: "verified",
       };
       await updateReport(id, payload);
+      if (report?.scheduleId) {
+        try {
+          const entry = await getScheduleEntry(report.scheduleId);
+          if (entry) {
+            if (entry.templateSelections && Array.isArray(entry.templateSelections)) {
+              const updated = entry.templateSelections.map((s) =>
+                s.reportId === report.reportId || s.reportId === report.id
+                  ? { ...s, status: "verified" }
+                  : s,
+              );
+              const allVerified = updated.every((s) => s.status === "verified");
+              await updateScheduleEntry(report.scheduleId, {
+                templateSelections: updated,
+                status: allVerified ? "verified" : updated.some((s) => s.status) ? "in_progress" : entry.status,
+              });
+            } else {
+              await updateScheduleEntry(report.scheduleId, { status: "verified" });
+            }
+          }
+        } catch (err) {
+          console.error("Failed to update schedule entry after customer sign:", err);
+        }
+      }
       setReport((prev) => ({ ...prev, ...payload }));
       setJustSigned(true);
     } catch (err) {

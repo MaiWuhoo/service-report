@@ -13,9 +13,12 @@ import ScheduleMaintenance from "./pages/ScheduleMaintenance";
 import ScheduleForms from "./pages/ScheduleForms";
 import FullCalendar from "./pages/FullCalendar";
 import AddChecklist from "./pages/AddChecklist";
+import ImportChecklistFromPdf from "./pages/ImportChecklistFromPdf";
 import Reports from "./pages/Reports";
 import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
+import ReportMedia from "./pages/ReportMedia";
+import Media from "./pages/Media";
 
 export default function App() {
   return (
@@ -37,6 +40,7 @@ export default function App() {
           <Route path="/schedule/:id/open" element={<ScheduleForms />} />
           <Route path="/calendar" element={<FullCalendar />} />
           <Route path="/checklist-templates/new" element={<AddChecklist />} />
+          <Route path="/checklist-templates/import" element={<ImportChecklistFromPdf />} />
           <Route
             path="/checklist-templates/:id/edit"
             element={<AddChecklist />}
@@ -45,6 +49,8 @@ export default function App() {
           <Route path="/customers/new" element={<AddCustomer />} />
           <Route path="/customers/:id/edit" element={<AddCustomer />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/media" element={<Media />} />
+          <Route path="/report-media/:id" element={<ReportMedia />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

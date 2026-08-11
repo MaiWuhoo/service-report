@@ -24,6 +24,7 @@ import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 import SignaturePad from "../components/SignaturePad";
 import PDFPreviewModal from "../components/PDFPreviewModal";
 import ImagePreviewModal from "../components/ImagePreviewModal";
+import ReportMediaViewer from "../components/ReportMediaViewer";
 
 function sectionSummary(section) {
   if (!section) return { checked: 0, remarks: 0 };
@@ -524,6 +525,8 @@ export default function ReviewSignoff() {
               </p>
             </div>
           )}
+
+          <ReportMediaViewer media={report.media} onPreview={setPreviewImage} />
 
           {!report.managerSignature && (
             <p className="mt-3 text-center text-xs text-muted">

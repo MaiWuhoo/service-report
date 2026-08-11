@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, MapPin, ChevronDown, ChevronRight, Download, Eye } from "lucide-react";
-import { getReport, updateReport } from "../lib/reportsApi";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
 import SignaturePad from "../components/SignaturePad";
 import { generateServiceReportPDF, getReportPDFArrayBuffer, getReportPDFFilename } from "../lib/generateReport";
 import PDFPreviewModal from "../components/PDFPreviewModal";
@@ -91,8 +91,36 @@ export default function CustomerSignBatch() {
         reviewedBy: customerName,
         managerSignature: dataUrl,
         reviewDate: new Date().toISOString().slice(0, 10),
+        status: "verified",
       };
       await Promise.all(reports.map((r) => updateReport(r.id, payload)));
+      const scheduleIds = [
+        ...new Set(reports.map((r) => r.scheduleId).filter(Boolean)),
+      ];
+      await Promise.all(
+        scheduleIds.map(async (scheduleId) => {
+          try {
+            const entry = await getScheduleEntry(scheduleId);
+            if (!entry) return;
+            if (entry.templateSelections && Array.isArray(entry.templateSelections)) {
+              const updated = entry.templateSelections.map((s) =>
+                reports.some((r) => s.reportId === r.reportId || s.reportId === r.id)
+                  ? { ...s, status: "verified" }
+                  : s,
+              );
+              const allVerified = updated.every((s) => s.status === "verified");
+              await updateScheduleEntry(scheduleId, {
+                templateSelections: updated,
+                status: allVerified ? "verified" : updated.some((s) => s.status) ? "in_progress" : entry.status,
+              });
+            } else {
+              await updateScheduleEntry(scheduleId, { status: "verified" });
+            }
+          } catch (err) {
+            console.error("Failed to update schedule entry after batch customer sign:", err);
+          }
+        }),
+      );
       setReports((prev) => prev.map((r) => ({ ...r, ...payload })));
       setJustSigned(true);
     } catch (err) {
