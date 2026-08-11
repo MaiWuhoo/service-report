@@ -142,6 +142,17 @@ export default function Sidebar({ open, onClose }) {
             <ListChecks size={18} /> Checklist Templates
           </button>
 
+          <button
+            onClick={() => go("/checklist-templates/import")}
+            className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition-colors ${
+              location.pathname === "/checklist-templates/import"
+                ? "bg-navy-800 text-white"
+                : "text-ink hover:bg-surface"
+            }`}
+          >
+            <FilePlus2 size={18} /> Import PDF
+          </button>
+
           {/* <button
             onClick={() => go("/checklist-templates/new")}
             className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold text-ink hover:bg-surface"
@@ -154,6 +165,17 @@ export default function Sidebar({ open, onClose }) {
             className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold text-ink hover:bg-surface"
           >
             <Building2 size={18} /> Customers
+          </button>
+
+          <button
+            onClick={() => go("/media")}
+            className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition-colors ${
+              location.pathname === "/media"
+                ? "bg-navy-800 text-white"
+                : "text-ink hover:bg-surface"
+            }`}
+          >
+            <FilePlus2 size={18} /> Media
           </button>
         </nav>
       </aside>

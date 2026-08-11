@@ -175,7 +175,17 @@ export default function ScheduleForms() {
                       )}
                     </div>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-                      <StatusBadge status={sel.status ?? "upcoming"} />
+                      <div className="flex flex-col gap-2 sm:gap-3">
+                        <StatusBadge status={sel.status ?? "upcoming"} />
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${sel.engineerSignature ? "bg-teal-50 text-teal-700 border border-teal-200" : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
+                            Tech: {sel.engineerSignature ? "Signed ✓" : "Pending"}
+                          </span>
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${sel.managerSignature ? "bg-teal-50 text-teal-700 border border-teal-200" : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
+                            Customer: {sel.managerSignature ? "Signed ✓" : "Pending"}
+                          </span>
+                        </div>
+                      </div>
                       <button
                         onClick={() => openInstance(sel)}
                         disabled={creatingId === sel.id}

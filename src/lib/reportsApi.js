@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   runTransaction,
   onSnapshot,
+  arrayUnion,
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -92,6 +93,14 @@ export async function updateReportSection(id, stepIndex, items, extraPayload = {
       updatedAt: serverTimestamp(),
     });
     return nextData;
+  });
+}
+
+export async function appendReportMedia(reportId, mediaEntry) {
+  const reportRef = doc(db, "serviceReports", reportId);
+  await updateDoc(reportRef, {
+    media: arrayUnion(mediaEntry),
+    updatedAt: serverTimestamp(),
   });
 }
 
