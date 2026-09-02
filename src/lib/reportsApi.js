@@ -201,6 +201,78 @@ export async function saveEngineerSignatures(signatures) {
   await setDoc(doc(db, "settings", "engineerSignatures"), { signatures }, { merge: true });
 }
 
+export async function getManagerSignatures() {
+  const snap = await getDoc(doc(db, "settings", "managerSignatures"));
+  if (!snap.exists()) return [];
+  return snap.data().signatures ?? [];
+}
+
+export async function saveManagerSignatures(signatures) {
+  await setDoc(doc(db, "settings", "managerSignatures"), { signatures }, { merge: true });
+}
+
+export async function autoSaveManagerSignature(name, signature, date) {
+  if (!name || !name.trim() || !signature) return;
+  try {
+    const existing = await getManagerSignatures();
+    const cleanName = name.trim();
+    const idx = existing.findIndex(
+      (s) => s.name.toLowerCase() === cleanName.toLowerCase()
+    );
+    let updated;
+    if (idx >= 0) {
+      updated = existing.map((s, i) =>
+        i === idx ? { ...s, name: cleanName, signature, date: date || s.date } : s
+      );
+    } else {
+      updated = [
+        ...existing,
+        {
+          id: crypto?.randomUUID?.() ?? `m-sig-${Date.now()}`,
+          name: cleanName,
+          signature,
+          date: date || new Date().toISOString().slice(0, 10),
+        },
+      ];
+    }
+    await saveManagerSignatures(updated);
+    return updated;
+  } catch (err) {
+    console.error("Auto-save manager signature error:", err);
+  }
+}
+
+export async function autoSaveEngineerSignature(name, signature, date) {
+  if (!name || !name.trim() || !signature) return;
+  try {
+    const existing = await getEngineerSignatures();
+    const cleanName = name.trim();
+    const idx = existing.findIndex(
+      (s) => s.name.toLowerCase() === cleanName.toLowerCase()
+    );
+    let updated;
+    if (idx >= 0) {
+      updated = existing.map((s, i) =>
+        i === idx ? { ...s, name: cleanName, signature, date: date || s.date } : s
+      );
+    } else {
+      updated = [
+        ...existing,
+        {
+          id: crypto?.randomUUID?.() ?? `sig-${Date.now()}`,
+          name: cleanName,
+          signature,
+          date: date || new Date().toISOString().slice(0, 10),
+        },
+      ];
+    }
+    await saveEngineerSignatures(updated);
+    return updated;
+  } catch (err) {
+    console.error("Auto-save engineer signature error:", err);
+  }
+}
+
 export async function listChecklistTemplates() {
   const snap = await getDocs(templatesCol);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
