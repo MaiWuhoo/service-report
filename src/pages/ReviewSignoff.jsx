@@ -17,6 +17,10 @@ import {
   subscribeToReport,
   getEngineerSignatures,
   saveEngineerSignatures,
+  getManagerSignatures,
+  saveManagerSignatures,
+  autoSaveManagerSignature,
+  autoSaveEngineerSignature,
 } from "../lib/reportsApi";
 import { generateServiceReportPDF } from "../lib/generateReport";
 import { compressImageToBlob } from "../lib/fileUtils";
@@ -57,6 +61,22 @@ export default function ReviewSignoff() {
     useState(null);
   const [editingSignatureId, setEditingSignatureId] = useState(null);
   const [editingSignatureName, setEditingSignatureName] = useState("");
+
+  const [managerName, setManagerName] = useState("");
+  const managerCanvasRef = useRef(null);
+  const [managerDate, setManagerDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [managerSignatureUrl, setManagerSignatureUrl] = useState(null);
+  const [savedManagerSignatures, setSavedManagerSignatures] = useState([]);
+  const [activeManagerSigId, setActiveManagerSigId] = useState(null);
+  const [savingManagerData, setSavingManagerData] = useState(false);
+  const [managerDataMessage, setManagerDataMessage] = useState("");
+  const [savingManagerSign, setSavingManagerSign] = useState(false);
+  const [showManagerPad, setShowManagerPad] = useState(false);
+  const [editingManagerSigId, setEditingManagerSigId] = useState(null);
+  const [editingManagerSigName, setEditingManagerSigName] = useState("");
+
   const [previewReport, setPreviewReport] = useState(null);
   const [expandedSections, setExpandedSections] = useState([]);
   const [previewImage, setPreviewImage] = useState(null);
@@ -68,11 +88,21 @@ export default function ReviewSignoff() {
   }
 
   function openPreview() {
+    let finalMgrSig = managerSignatureUrl;
+    if (showManagerPad && managerCanvasRef.current) {
+      const drawn = managerCanvasRef.current.toDataURL("image/png");
+      if (drawn) finalMgrSig = drawn;
+    }
     setPreviewReport({
       ...report,
       engineerName,
-      engineerSignature: engineerCanvasRef.current?.toDataURL("image/png"),
+      engineerSignature:
+        engineerCanvasRef.current?.toDataURL("image/png") ||
+        report.engineerSignature,
       engineerDate,
+      reviewedBy: managerName,
+      managerSignature: finalMgrSig,
+      reviewDate: managerDate,
       companyStamp,
     });
   }
@@ -131,6 +161,11 @@ export default function ReviewSignoff() {
         setEngineerDate(
           r.engineerDate ?? new Date().toISOString().slice(0, 10),
         );
+        setManagerName(r.reviewedBy ?? "");
+        setManagerDate(
+          r.reviewDate ?? new Date().toISOString().slice(0, 10),
+        );
+        setManagerSignatureUrl(r.managerSignature ?? null);
         initialized = true;
       }
     });
@@ -140,8 +175,12 @@ export default function ReviewSignoff() {
   useEffect(() => {
     async function loadShared() {
       try {
-        const list = await getEngineerSignatures();
+        const [list, mList] = await Promise.all([
+          getEngineerSignatures(),
+          getManagerSignatures(),
+        ]);
         setSavedEngineerSignatures(list || []);
+        setSavedManagerSignatures(mList || []);
         if (list?.length > 0 && !report?.engineerSignature) {
           setActiveSignatureId(list[0].id);
         }
@@ -154,7 +193,9 @@ export default function ReviewSignoff() {
 
   function clearCanvas(ref) {
     const canvas = ref.current;
-    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    if (canvas) {
+      canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    }
   }
 
   function selectEngineerSignature(signature) {
@@ -167,6 +208,90 @@ export default function ReviewSignoff() {
       engineerName: signature.name,
       engineerSignature: signature.signature,
     }));
+  }
+
+  function selectManagerSignature(signature) {
+    setManagerName(signature.name);
+    setManagerDate(signature.date ?? managerDate);
+    setActiveManagerSigId(signature.id);
+    setManagerSignatureUrl(signature.signature);
+    setShowManagerPad(false);
+  }
+
+  async function saveManagerData() {
+    if (!id || !report) return;
+    setSavingManagerData(true);
+    setManagerDataMessage("");
+
+    let finalSig = managerSignatureUrl;
+    if (showManagerPad && managerCanvasRef.current) {
+      const drawn = managerCanvasRef.current.toDataURL("image/png");
+      if (drawn) finalSig = drawn;
+    }
+
+    try {
+      const payload = {
+        reviewedBy: managerName,
+        managerSignature: finalSig,
+        reviewDate: managerDate,
+      };
+      await updateReport(id, payload);
+      setReport((prev) => ({ ...prev, ...payload }));
+      setManagerSignatureUrl(finalSig);
+
+      if (managerName?.trim() && finalSig) {
+        const updatedList = await autoSaveManagerSignature(
+          managerName,
+          finalSig,
+          managerDate,
+        );
+        if (updatedList) setSavedManagerSignatures(updatedList);
+      }
+
+      setManagerDataMessage(
+        "Manager verification saved & signature stored for future reports!",
+      );
+      setTimeout(() => setManagerDataMessage(""), 4000);
+    } catch (err) {
+      alert(`Failed to save manager verification data: ${err.message}`);
+    } finally {
+      setSavingManagerData(false);
+    }
+  }
+
+  async function saveNewManagerSignatureToSaved() {
+    let sigData = managerSignatureUrl;
+    if (showManagerPad && managerCanvasRef.current) {
+      sigData = managerCanvasRef.current.toDataURL("image/png");
+    }
+    if (!managerName?.trim()) {
+      alert("Please enter Manager/Team Name first.");
+      return;
+    }
+    if (!sigData) {
+      alert("Please draw or select a signature first.");
+      return;
+    }
+
+    setSavingManagerSign(true);
+    const newSig = {
+      id: crypto?.randomUUID?.() ?? `m-sig-${Date.now()}`,
+      name: managerName.trim(),
+      signature: sigData,
+      date: managerDate,
+    };
+    const nextList = [...savedManagerSignatures, newSig];
+    try {
+      await saveManagerSignatures(nextList);
+      setSavedManagerSignatures(nextList);
+      setActiveManagerSigId(newSig.id);
+      setManagerSignatureUrl(sigData);
+      alert(`Saved "${newSig.name}" to manager signatures.`);
+    } catch (err) {
+      alert(`Failed to save manager signature: ${err.message}`);
+    } finally {
+      setSavingManagerSign(false);
+    }
   }
 
   async function saveEngineerSign() {
@@ -218,18 +343,44 @@ export default function ReviewSignoff() {
 
   async function approve() {
     if (!id || !report) return;
-    const engineerSignature = engineerCanvasRef.current?.toDataURL("image/png");
+    const engineerSignature =
+      engineerCanvasRef.current?.toDataURL("image/png") ||
+      report.engineerSignature;
+    let finalMgrSig = managerSignatureUrl;
+    if (showManagerPad && managerCanvasRef.current) {
+      const drawn = managerCanvasRef.current.toDataURL("image/png");
+      if (drawn) finalMgrSig = drawn;
+    }
 
     const payload = {
       status: "verified",
       engineerName,
       engineerSignature,
       engineerDate,
+      reviewedBy: managerName,
+      managerSignature: finalMgrSig,
+      reviewDate: managerDate,
       companyStamp,
     };
 
     try {
       await updateReport(id, payload);
+      if (managerName?.trim() && finalMgrSig) {
+        const updatedMgrList = await autoSaveManagerSignature(
+          managerName,
+          finalMgrSig,
+          managerDate,
+        );
+        if (updatedMgrList) setSavedManagerSignatures(updatedMgrList);
+      }
+      if (engineerName?.trim() && engineerSignature) {
+        const updatedEngList = await autoSaveEngineerSignature(
+          engineerName,
+          engineerSignature,
+          engineerDate,
+        );
+        if (updatedEngList) setSavedEngineerSignatures(updatedEngList);
+      }
       if (report.scheduleId) {
         try {
           const entry = await getScheduleEntry(report.scheduleId);
@@ -239,7 +390,14 @@ export default function ReviewSignoff() {
           ) {
             const updated = entry.templateSelections.map((s) =>
               s.reportId === report.reportId || s.reportId === report.id
-                ? { ...s, status: "verified" }
+                ? {
+                    ...s,
+                    status: "verified",
+                    engineerSignature: engineerSignature || s.engineerSignature,
+                    managerSignature: finalMgrSig || s.managerSignature,
+                    engineerName: engineerName || s.engineerName,
+                    reviewedBy: managerName || s.reviewedBy,
+                  }
                 : s,
             );
             const allVerified = updated.every((s) => s.status === "verified");
@@ -455,61 +613,235 @@ export default function ReviewSignoff() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-border p-4">
-              <p className="mb-1 text-xs font-bold uppercase text-navy-800">
-                Verified by Manager/Team
-              </p>
-              <p className="mb-2 text-sm font-semibold text-ink">
-                {report.reviewedBy || "-"}
-              </p>
-              {report.managerSignature ? (
-                <img
-                  src={report.managerSignature}
-                  alt="Manager signature"
-                  className="h-20 w-full rounded-md border border-dashed border-border bg-surface object-contain"
+            <div className="rounded-lg border border-border p-4 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold uppercase text-navy-800">
+                  Verified by Manager/Team
+                </p>
+                {savedManagerSignatures.length > 0 && (
+                  <span className="rounded-full bg-navy-50 px-2 py-0.5 text-[10px] font-semibold text-navy-800">
+                    {savedManagerSignatures.length} Saved
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted">
+                  Manager / Team Name
+                </label>
+                <input
+                  type="text"
+                  value={managerName}
+                  onChange={(e) => setManagerName(e.target.value)}
+                  placeholder="e.g. Muhammad Hilmie"
+                  className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm font-semibold text-ink focus:outline-none focus:ring-1 focus:ring-navy-700"
                 />
-              ) : (
-                <div className="flex h-20 items-center justify-center rounded-md border border-dashed border-border bg-surface text-xs text-muted">
-                  Not signed yet
+              </div>
+
+              {/* Saved Manager/Team Signatures List */}
+              <div className="rounded-md border border-border bg-surface p-2.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-navy-800">
+                    Saved Manager/Team Signatures
+                  </p>
                 </div>
-              )}
+
+                {savedManagerSignatures.length === 0 ? (
+                  <p className="text-xs text-muted italic">
+                    No saved manager signatures yet. Draw a signature below and click &quot;+ Save to Manager Signatures&quot; to add one.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {savedManagerSignatures.map((s) => (
+                      <div key={s.id} className="flex items-center gap-1">
+                        {editingManagerSigId === s.id ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={editingManagerSigName}
+                              onChange={(e) =>
+                                setEditingManagerSigName(e.target.value)
+                              }
+                              className="rounded border border-border bg-white px-1.5 py-0.5 text-xs font-medium"
+                            />
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const next = savedManagerSignatures.map((sig) =>
+                                  sig.id === s.id
+                                    ? { ...sig, name: editingManagerSigName }
+                                    : sig,
+                                );
+                                try {
+                                  await saveManagerSignatures(next);
+                                  setSavedManagerSignatures(next);
+                                  setEditingManagerSigId(null);
+                                  if (activeManagerSigId === s.id) {
+                                    setManagerName(editingManagerSigName);
+                                  }
+                                } catch (err) {
+                                  alert(`Failed to update signature name: ${err.message}`);
+                                }
+                              }}
+                              className="rounded bg-teal-600 px-1.5 py-0.5 text-[11px] font-semibold text-white"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingManagerSigId(null)}
+                              className="rounded border px-1.5 py-0.5 text-[11px]"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 rounded-md border border-border bg-white p-1 shadow-xs">
+                            <button
+                              type="button"
+                              onClick={() => selectManagerSignature(s)}
+                              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                                activeManagerSigId === s.id || managerSignatureUrl === s.signature
+                                  ? "bg-navy-800 text-white font-bold"
+                                  : "text-ink hover:bg-navy-50"
+                              }`}
+                            >
+                              {s.name}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingManagerSigId(s.id);
+                                setEditingManagerSigName(s.name);
+                              }}
+                              className="rounded px-1.5 py-0.5 text-[10px] text-muted hover:bg-surface hover:text-ink"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!confirm(`Remove saved signature for "${s.name}"?`))
+                                  return;
+                                const next = savedManagerSignatures.filter(
+                                  (sig) => sig.id !== s.id,
+                                );
+                                try {
+                                  await saveManagerSignatures(next);
+                                  setSavedManagerSignatures(next);
+                                  if (activeManagerSigId === s.id) {
+                                    setActiveManagerSigId(null);
+                                  }
+                                } catch (err) {
+                                  alert(`Failed to remove signature: ${err.message}`);
+                                }
+                              }}
+                              className="rounded px-1.5 py-0.5 text-[10px] text-danger-600 hover:bg-danger-50"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="text-xs font-medium text-muted">
+                    Signature Preview / Draw
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowManagerPad((prev) => !prev)}
+                      className="text-xs font-semibold text-navy-700 hover:underline"
+                    >
+                      {showManagerPad ? "Hide Canvas" : "Draw Signature"}
+                    </button>
+                    {managerSignatureUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManagerSignatureUrl(null);
+                          setActiveManagerSigId(null);
+                        }}
+                        className="text-xs font-semibold text-danger-600 hover:underline"
+                      >
+                        Clear Sign
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {showManagerPad ? (
+                  <div className="space-y-2">
+                    <SignaturePad
+                      label=""
+                      name={managerName}
+                      onNameChange={setManagerName}
+                      canvasRef={managerCanvasRef}
+                      onClear={() => clearCanvas(managerCanvasRef)}
+                      signatureDataUrl={managerSignatureUrl}
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={saveNewManagerSignatureToSaved}
+                        disabled={savingManagerSign}
+                        className="rounded-md border border-navy-800 px-2.5 py-1 text-[11px] font-semibold text-navy-800 hover:bg-navy-50 disabled:opacity-50"
+                      >
+                        {savingManagerSign ? "Saving..." : "+ Save to Manager Signatures"}
+                      </button>
+                    </div>
+                  </div>
+                ) : managerSignatureUrl ? (
+                  <img
+                    src={managerSignatureUrl}
+                    alt="Manager signature"
+                    className="h-20 w-full rounded-md border border-dashed border-border bg-surface object-contain p-1"
+                  />
+                ) : (
+                  <div className="flex h-20 items-center justify-center rounded-md border border-dashed border-border bg-surface text-xs text-muted">
+                    Not signed yet. Select a saved sign above or click &quot;Draw Signature&quot;.
+                  </div>
+                )}
+              </div>
+
               <div className="mt-2">
-                <label className="block text-xs text-muted">Date</label>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
+                <label className="mb-1 block text-xs font-medium text-muted">Date</label>
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="date"
-                    value={engineerDate}
-                    onChange={(e) => setEngineerDate(e.target.value)}
-                    className="rounded-md border border-border bg-surface px-2 py-1 text-sm"
+                    value={managerDate}
+                    onChange={(e) => setManagerDate(e.target.value)}
+                    className="rounded-md border border-border bg-surface px-2 py-1 text-sm font-medium text-ink"
                   />
                   <button
                     type="button"
-                    onClick={saveEngineerDate}
-                    disabled={
-                      savingEngineerDate ||
-                      engineerDate === (report.engineerDate || "")
-                    }
-                    className="rounded-md bg-navy-800 px-3 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={saveManagerData}
+                    disabled={savingManagerData}
+                    className="rounded-md bg-navy-800 px-3.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {savingEngineerDate ? "Saving…" : "Save"}
+                    {savingManagerData ? "Saving…" : "Save"}
                   </button>
                 </div>
-                {engineerDateMessage && (
-                  <p className="mt-1 text-xs text-teal-600">
-                    {engineerDateMessage}
+                {managerDataMessage && (
+                  <p className="mt-1 text-xs font-semibold text-teal-600">
+                    {managerDataMessage}
                   </p>
                 )}
               </div>
 
-              {!report.managerSignature && (
-                <button
-                  onClick={handleCopySignLink}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-md border-2 border-navy-800 py-2 text-xs font-bold text-navy-800 hover:bg-navy-50"
-                >
-                  <Share2 size={14} />{" "}
-                  {copied ? "Link Copied ✓" : "Copy Sign-off Link"}
-                </button>
-              )}
+              <button
+                onClick={handleCopySignLink}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-md border-2 border-navy-800 py-2 text-xs font-bold text-navy-800 hover:bg-navy-50"
+              >
+                <Share2 size={14} />{" "}
+                {copied ? "Link Copied ✓" : "Copy Sign-off Link"}
+              </button>
             </div>
           </div>
 

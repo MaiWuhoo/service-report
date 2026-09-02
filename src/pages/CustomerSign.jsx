@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, MapPin, Eye, ChevronDown, ChevronRight, Upload, X, Download } from "lucide-react";
-import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, autoSaveManagerSignature } from "../lib/reportsApi";
 import { readFileAsDataURL } from "../lib/fileUtils";
 import SignaturePad from "../components/SignaturePad";
 import PDFPreviewModal from "../components/PDFPreviewModal";
@@ -69,6 +69,7 @@ export default function CustomerSign() {
         status: "verified",
       };
       await updateReport(id, payload);
+      await autoSaveManagerSignature(customerName, dataUrl, payload.reviewDate);
       if (report?.scheduleId) {
         try {
           const entry = await getScheduleEntry(report.scheduleId);
@@ -76,7 +77,13 @@ export default function CustomerSign() {
             if (entry.templateSelections && Array.isArray(entry.templateSelections)) {
               const updated = entry.templateSelections.map((s) =>
                 s.reportId === report.reportId || s.reportId === report.id
-                  ? { ...s, status: "verified" }
+                  ? {
+                      ...s,
+                      status: "verified",
+                      managerSignature: dataUrl,
+                      reviewedBy: customerName,
+                      engineerSignature: s.engineerSignature || report.engineerSignature,
+                    }
                   : s,
               );
               const allVerified = updated.every((s) => s.status === "verified");

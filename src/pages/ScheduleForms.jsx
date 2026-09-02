@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getScheduleEntry, listChecklistTemplates, updateScheduleEntry, getReport } from "../lib/reportsApi";
+import { getScheduleEntry, listChecklistTemplates, updateScheduleEntry, getReport, listRecentReports } from "../lib/reportsApi";
 import StatusBadge from "../components/StatusBadge";
 import { createReportFromTemplate } from "../lib/createReportFromTemplate";
 import { DEFAULT_TEMPLATE } from "../lib/defaultTemplates";
@@ -37,48 +37,87 @@ export default function ScheduleForms() {
           ...sel,
         }));
 
+        let allRecentReports = [];
+        try {
+          allRecentReports = await listRecentReports(200);
+        } catch {}
+
         const enhanced = await Promise.all(
           normalized.map(async (sel) => {
             const s = { ...sel };
+            let report = null;
+
             if (s.reportId) {
               try {
-                const report = await getReport(s.reportId);
-                if (report) {
-                  s.reportExists = true;
-                  s.status = report.status === "draft" ? "in_progress" : report.status;
-                  const ts = report.updatedAt || report.createdAt;
-                  if (ts && ts.toDate) {
-                    s.timestamp = ts.toDate().toLocaleString("en-GB", {
-                      day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
-                    });
-                  } else if (ts) {
-                    s.timestamp = new Date(ts).toLocaleString("en-GB", {
-                      day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
-                    });
-                  }
-                } else {
-                  s.reportExists = false;
-                  s.reportId = null;
-                  s.status = "upcoming";
-                }
+                report = await getReport(s.reportId);
               } catch (err) {
                 console.error("Error fetching report", err);
               }
+            }
+
+            if (!report) {
+              const selLoc = (s.location ?? "").trim().toLowerCase();
+              report = allRecentReports.find((r) => {
+                const rLoc = (r.locationDoor ?? "").trim().toLowerCase();
+                const matchesSchedule = r.scheduleId === e.id || r.scheduleId === id;
+                const matchesLocation = selLoc && rLoc === selLoc;
+                return (matchesSchedule && matchesLocation) || (matchesSchedule && !selLoc);
+              });
+
+              if (!report && selLoc) {
+                report = allRecentReports.find(
+                  (r) => (r.locationDoor ?? "").trim().toLowerCase() === selLoc
+                );
+              }
+            }
+
+            if (report) {
+              s.reportId = report.id;
+              s.reportExists = true;
+              s.status = report.status === "draft" ? "in_progress" : report.status;
+              s.engineerSignature = report.engineerSignature ?? null;
+              s.managerSignature = report.managerSignature ?? null;
+              s.engineerName = report.engineerName ?? null;
+              s.reviewedBy = report.reviewedBy ?? null;
+              const ts = report.updatedAt || report.createdAt;
+              if (ts && ts.toDate) {
+                s.timestamp = ts.toDate().toLocaleString("en-GB", {
+                  day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+                });
+              } else if (ts) {
+                s.timestamp = new Date(ts).toLocaleString("en-GB", {
+                  day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+                });
+              }
             } else {
+              s.reportExists = false;
+              s.reportId = null;
               s.status = "upcoming";
+              s.engineerSignature = null;
+              s.managerSignature = null;
             }
             return s;
           })
         );
 
-        const needsUpdate = JSON.stringify(e.templateSelections) !== JSON.stringify(enhanced.map(({ timestamp, reportExists, ...rest }) => rest));
+        const allVerified = enhanced.length > 0 && enhanced.every((s) => s.status === "verified");
+        const anyInProgress = enhanced.some((s) => s.status === "verified" || s.status === "in_progress");
+        const computedScheduleStatus = allVerified ? "verified" : anyInProgress ? "in_progress" : "upcoming";
+
+        const needsUpdate =
+          e.status !== computedScheduleStatus ||
+          JSON.stringify(e.templateSelections) !==
+            JSON.stringify(enhanced.map(({ timestamp, reportExists, ...rest }) => rest));
         
         if (needsUpdate) {
           const toSave = enhanced.map(({ timestamp, reportExists, ...rest }) => rest);
-          await updateScheduleEntry(e.id, { templateSelections: toSave });
+          await updateScheduleEntry(e.id, {
+            templateSelections: toSave,
+            status: computedScheduleStatus,
+          });
         }
 
-        setEntry({ ...e, templateSelections: enhanced });
+        setEntry({ ...e, status: computedScheduleStatus, templateSelections: enhanced });
       } catch (err) {
         console.error(err);
       } finally {

@@ -8,11 +8,16 @@ import {
   Square,
   X,
   Edit,
+  FileText,
 } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import { listRecentReports, deleteReport } from "../lib/reportsApi";
 import { reportResumeUrl } from "../lib/reportResumeUrl";
 import { generateServiceReportPDF } from "../lib/generateReport";
+import {
+  generateSummaryPDF,
+  getSummaryPDFBlobUrl,
+} from "../lib/generateSummaryPDF";
 
 export default function Reports() {
   const navigate = useNavigate();
@@ -25,6 +30,8 @@ export default function Reports() {
   const [batchCopied, setBatchCopied] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [summaryPreviewUrl, setSummaryPreviewUrl] = useState(null);
 
   const sortedReports = [...reports].sort((a, b) => {
     const projectA = (a.templateName ?? "").toLowerCase();
@@ -136,6 +143,36 @@ export default function Reports() {
     }
   }
 
+  function handleGenerateSummary() {
+    const selectedReports = reports.filter((r) => selectedIds.has(r.id));
+    if (selectedReports.length === 0) {
+      alert("Sila pilih sekurang-kurangnya 1 laporan.");
+      return;
+    }
+    setGeneratingSummary(true);
+    try {
+      generateSummaryPDF(selectedReports, `Summary_Report_${Date.now()}.pdf`);
+    } catch (err) {
+      alert(`Gagal generate Summary PDF: ${err.message}`);
+    } finally {
+      setGeneratingSummary(false);
+    }
+  }
+
+  function handlePreviewSummary() {
+    const selectedReports = reports.filter((r) => selectedIds.has(r.id));
+    if (selectedReports.length === 0) {
+      alert("Sila pilih sekurang-kurangnya 1 laporan.");
+      return;
+    }
+    try {
+      const url = getSummaryPDFBlobUrl(selectedReports);
+      setSummaryPreviewUrl(url);
+    } catch (err) {
+      alert(`Gagal preview Summary PDF: ${err.message}`);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -166,21 +203,43 @@ export default function Reports() {
       </div>
 
       {selectMode && (
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-navy-800 bg-navy-50 p-4">
-          <p className="text-sm font-semibold text-navy-800">
-            {selectedIds.size} report{selectedIds.size === 1 ? "" : "s"}{" "}
-            selected
-          </p>
-          <button
-            onClick={handleShareBatch}
-            disabled={selectedIds.size === 0}
-            className="flex items-center gap-2 rounded-md bg-navy-800 px-4 py-2 text-sm font-bold text-white hover:bg-navy-700 disabled:opacity-50"
-          >
-            <Share2 size={15} />{" "}
-            {batchCopied
-              ? "Link Copied ✓"
-              : `Copy Link to Edit & Sign (${selectedIds.size || ""} Report${selectedIds.size === 1 ? "" : "s"})`}
-          </button>
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-navy-800 bg-navy-50 p-4 shadow-sm">
+          <div>
+            <p className="text-sm font-bold text-navy-800">
+              {selectedIds.size} report{selectedIds.size === 1 ? "" : "s"}{" "}
+              selected
+            </p>
+            <p className="text-xs text-muted">
+              Generate a summary PDF report or copy sign-off link for selected items.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleGenerateSummary}
+              disabled={selectedIds.size === 0 || generatingSummary}
+              className="flex items-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
+            >
+              <FileText size={15} />
+              {generatingSummary ? "Generating…" : "Generate Summary PDF"}
+            </button>
+
+            <button
+              onClick={handlePreviewSummary}
+              disabled={selectedIds.size === 0}
+              className="flex items-center gap-2 rounded-md border border-teal-700 bg-white px-3 py-2 text-sm font-bold text-teal-700 hover:bg-teal-50 disabled:opacity-50"
+            >
+              Preview Summary
+            </button>
+
+            <button
+              onClick={handleShareBatch}
+              disabled={selectedIds.size === 0}
+              className="flex items-center gap-2 rounded-md bg-navy-800 px-4 py-2 text-sm font-bold text-white hover:bg-navy-700 disabled:opacity-50"
+            >
+              <Share2 size={15} />{" "}
+              {batchCopied ? "Link Copied ✓" : "Copy Sign-off Link"}
+            </button>
+          </div>
         </section>
       )}
 
@@ -300,6 +359,42 @@ export default function Reports() {
           ))}
         </div>
       </section>
+
+      {summaryPreviewUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="flex h-[90vh] w-full max-w-5xl flex-col rounded-xl bg-white shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3 bg-navy-900 text-white">
+              <h3 className="font-bold text-base flex items-center gap-2">
+                <FileText size={18} /> Summary of Maintenance Work Preview
+              </h3>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleGenerateSummary}
+                  className="flex items-center gap-1.5 rounded-md bg-teal-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-500"
+                >
+                  <Download size={14} /> Download Summary PDF
+                </button>
+                <button
+                  onClick={() => {
+                    URL.revokeObjectURL(summaryPreviewUrl);
+                    setSummaryPreviewUrl(null);
+                  }}
+                  className="rounded-md p-1 hover:bg-navy-800 text-white"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-surface p-2">
+              <iframe
+                src={summaryPreviewUrl}
+                title="Summary PDF Preview"
+                className="h-full w-full rounded-md border border-border"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -454,7 +454,19 @@ export default function Portal() {
                   </p>
                 )}
               </div>
-              <StatusBadge status={s.reportId ? s.status : "upcoming"} />
+              <StatusBadge status={(() => {
+                if (s.templateSelections && s.templateSelections.length > 0) {
+                  const statuses = s.templateSelections.map((sel) => sel.status ?? "upcoming");
+                  if (statuses.length > 0 && statuses.every((st) => st === "verified")) {
+                    return "verified";
+                  }
+                  if (statuses.some((st) => st === "verified" || st === "in_progress")) {
+                    return "in_progress";
+                  }
+                  return "upcoming";
+                }
+                return s.status ?? "upcoming";
+              })()} />
               <button
                 onClick={(e) => {
                   e.stopPropagation();
