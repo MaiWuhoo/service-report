@@ -18,7 +18,9 @@ import { generateServiceReportPDF } from "../lib/generateReport";
 import {
   generateSummaryPDF,
   getSummaryPDFBlobUrl,
+  getSummaryPDFFilename,
 } from "../lib/generateSummaryPDF";
+import SummaryPreviewModal from "../components/SummaryPreviewModal";
 
 export default function Reports() {
   const navigate = useNavigate();
@@ -31,8 +33,8 @@ export default function Reports() {
   const [batchCopied, setBatchCopied] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [generatingSummary, setGeneratingSummary] = useState(false);
-  const [summaryPreviewUrl, setSummaryPreviewUrl] = useState(null);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [summaryOrientation, setSummaryOrientation] = useState("landscape");
 
   const sortedReports = [...reports].sort((a, b) => {
     const projectA = (a.templateName ?? "").toLowerCase();
@@ -146,34 +148,13 @@ export default function Reports() {
     }
   }
 
-  function handleGenerateSummary() {
+  function handleOpenSummary() {
     const selectedReports = reports.filter((r) => selectedIds.has(r.id));
     if (selectedReports.length === 0) {
       alert("Sila pilih sekurang-kurangnya 1 laporan.");
       return;
     }
-    setGeneratingSummary(true);
-    try {
-      generateSummaryPDF(selectedReports, `Summary_Report_${Date.now()}.pdf`);
-    } catch (err) {
-      alert(`Gagal generate Summary PDF: ${err.message}`);
-    } finally {
-      setGeneratingSummary(false);
-    }
-  }
-
-  function handlePreviewSummary() {
-    const selectedReports = reports.filter((r) => selectedIds.has(r.id));
-    if (selectedReports.length === 0) {
-      alert("Sila pilih sekurang-kurangnya 1 laporan.");
-      return;
-    }
-    try {
-      const url = getSummaryPDFBlobUrl(selectedReports);
-      setSummaryPreviewUrl(url);
-    } catch (err) {
-      alert(`Gagal preview Summary PDF: ${err.message}`);
-    }
+    setShowSummaryModal(true);
   }
 
   return (
@@ -216,22 +197,40 @@ export default function Reports() {
               Generate a summary PDF report or copy sign-off link for selected items.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={handleGenerateSummary}
-              disabled={selectedIds.size === 0 || generatingSummary}
-              className="flex items-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
-            >
-              <FileText size={15} />
-              {generatingSummary ? "Generating…" : "Generate Summary PDF"}
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center rounded-lg border border-teal-700/40 bg-white p-0.5 shadow-xs text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setSummaryOrientation("landscape")}
+                className={`px-2.5 py-1.5 rounded-md transition ${
+                  summaryOrientation === "landscape"
+                    ? "bg-teal-700 text-white shadow-xs font-bold"
+                    : "text-ink/70 hover:text-ink hover:bg-slate-100"
+                }`}
+                title="Landscape (Horizontal)"
+              >
+                Landscape
+              </button>
+              <button
+                type="button"
+                onClick={() => setSummaryOrientation("portrait")}
+                className={`px-2.5 py-1.5 rounded-md transition ${
+                  summaryOrientation === "portrait"
+                    ? "bg-teal-700 text-white shadow-xs font-bold"
+                    : "text-ink/70 hover:text-ink hover:bg-slate-100"
+                }`}
+                title="Portrait (Vertical)"
+              >
+                Portrait
+              </button>
+            </div>
 
             <button
-              onClick={handlePreviewSummary}
+              onClick={handleOpenSummary}
               disabled={selectedIds.size === 0}
-              className="flex items-center gap-2 rounded-md border border-teal-700 bg-white px-3 py-2 text-sm font-bold text-teal-700 hover:bg-teal-50 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50 transition"
             >
-              Preview Summary
+              <FileText size={16} /> View & Download Summary
             </button>
 
             <button
@@ -363,40 +362,12 @@ export default function Reports() {
         </div>
       </section>
 
-      {summaryPreviewUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="flex h-[90vh] w-full max-w-5xl flex-col rounded-xl bg-white shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between border-b border-border px-5 py-3 bg-navy-900 text-white">
-              <h3 className="font-bold text-base flex items-center gap-2">
-                <FileText size={18} /> Summary of Maintenance Work Preview
-              </h3>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleGenerateSummary}
-                  className="flex items-center gap-1.5 rounded-md bg-teal-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-500"
-                >
-                  <Download size={14} /> Download Summary PDF
-                </button>
-                <button
-                  onClick={() => {
-                    URL.revokeObjectURL(summaryPreviewUrl);
-                    setSummaryPreviewUrl(null);
-                  }}
-                  className="rounded-md p-1 hover:bg-navy-800 text-white"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 bg-surface p-2">
-              <iframe
-                src={summaryPreviewUrl}
-                title="Summary PDF Preview"
-                className="h-full w-full rounded-md border border-border"
-              />
-            </div>
-          </div>
-        </div>
+      {showSummaryModal && (
+        <SummaryPreviewModal
+          reports={reports.filter((r) => selectedIds.has(r.id))}
+          onClose={() => setShowSummaryModal(false)}
+          initialOrientation={summaryOrientation}
+        />
       )}
     </div>
   );
