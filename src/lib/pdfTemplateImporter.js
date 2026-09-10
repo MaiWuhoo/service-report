@@ -46,12 +46,17 @@ export function parsePdfTextToTemplate(pdfTextOrPages = "", options = {}) {
     let current = { sectionName: defaultSectionName, items: [] };
 
     for (const line of lines) {
-      const normalized = line.trim();
+      const normalized = line
+        .trim()
+        .replace(/^\|\s*/, "")
+        .replace(/\s*\|\s*$/, "")
+        .trim();
       if (!normalized) continue;
       if (/^page\s*\d+/i.test(normalized)) {
         continue;
       }
-      const sectionMatch = normalized.match(/^(?:section|part|chapter|page)\s*[:\-]?\s*(.+)$/i);
+      const sectionMatch = normalized.match(/^(?:section|part|chapter|page)\s*[:\-]?\s*(.+)$/i)
+        || normalized.match(/^[A-Z][.)]\s+(.+)$/);
       if (sectionMatch) {
         if (current.items.length) pageSections.push(current);
         current = {
@@ -65,9 +70,16 @@ export function parsePdfTextToTemplate(pdfTextOrPages = "", options = {}) {
         continue;
       }
 
-      const itemMatch = normalized.match(/^([\d]+[\).\-]|[•\*\-+]\s+)/);
-      if (itemMatch || normalized.length > 3) {
-        current.items.push({ question: normalized });
+      if (/^\d+$/.test(normalized)) {
+        continue;
+      }
+      const question = normalized
+        .replace(/^\d+(?:\s*[|.)\-:]|\s+)\s*/, "")
+        .replace(/\s*\|\s*$/, "")
+        .trim();
+      const itemMatch = question.match(/^(?:[•\*\-+]\s+)/);
+      if (itemMatch || question.length > 3) {
+        current.items.push({ question });
       }
     }
 

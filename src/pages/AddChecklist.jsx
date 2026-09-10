@@ -144,16 +144,13 @@ export default function AddChecklist() {
         />
 
         <label className="mb-1 block text-sm font-semibold text-ink">Category</label>
-        <select
+        <input
+          type="text"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
+          placeholder="e.g., Access Control"
           className="mb-4 w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm"
-        >
-          <option>Access Control</option>
-          <option>Mechanical Maintenance</option>
-          <option>Infrastructure &amp; Power Supply</option>
-          <option>Safety Interlocks</option>
-        </select>
+        />
 
         {/* <label className="mb-1 block text-sm font-semibold text-ink">Assigned Technician</label>
         <input

@@ -234,12 +234,32 @@ export default function ImportChecklistFromPdf() {
     for (let i = 1; i <= pdf.numPages; i += 1) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items.map((item) => item.str).join(" ");
+      const positionedItems = content.items
+        .filter((item) => item.str && item.str.trim())
+        .map((item) => ({
+          text: item.str.trim(),
+          x: item.transform?.[4] ?? 0,
+          y: item.transform?.[5] ?? 0,
+        }))
+        .sort((a, b) => b.y - a.y || a.x - b.x);
+      const lines = [];
+      for (const item of positionedItems) {
+        const line = lines.find((candidate) => Math.abs(candidate.y - item.y) <= 3);
+        if (line) {
+          line.items.push(item);
+        } else {
+          lines.push({ y: item.y, items: [item] });
+        }
+      }
+      const pageText = lines
+        .sort((a, b) => b.y - a.y)
+        .map((line) => line.items.sort((a, b) => a.x - b.x).map((item) => item.text).join(" "))
+        .join("\n");
       text += `${pageText}\n`;
       pageTexts.push(pageText);
 
-      // render page to canvas for image preview
-      const viewport = page.getViewport({ scale: 1.5 });
+      // Render scanned pages at higher resolution so small table text survives OCR.
+      const viewport = page.getViewport({ scale: 3 });
       const canvas = document.createElement("canvas");
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
@@ -642,6 +662,22 @@ export default function ImportChecklistFromPdf() {
     });
   }
 
+  function moveItemToNewPage(sIdx, iIdx) {
+    setEditableTemplate((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev || {}));
+      copy.sections = copy.sections || [];
+      const sourceSection = copy.sections[sIdx];
+      const item = sourceSection?.items?.[iIdx];
+      if (!item) return copy;
+      sourceSection.items.splice(iIdx, 1);
+      copy.sections.push({
+        sectionName: `Page ${copy.sections.length + 1}`,
+        items: [item],
+      });
+      return copy;
+    });
+  }
+
   function addSection() {
     setEditableTemplate((prev) => {
       const copy = JSON.parse(JSON.stringify(prev || {}));
@@ -914,6 +950,13 @@ export default function ImportChecklistFromPdf() {
                       placeholder="Checklist item"
                       className="flex-1 rounded-md border border-border bg-white px-3 py-2.5 text-sm"
                     />
+                    <button
+                      onClick={() => moveItemToNewPage(sIdx, iIdx)}
+                      className="whitespace-nowrap text-sm font-semibold text-navy-700 hover:text-navy-900"
+                      title="Move this item to a new page"
+                    >
+                      + New Page
+                    </button>
                     <button
                       onClick={() => removeItem(sIdx, iIdx)}
                       className="text-muted hover:text-danger-600"
