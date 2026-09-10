@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { CheckCircle2, MapPin, ChevronDown, ChevronRight, Download, Eye } from "lucide-react";
+import { CheckCircle2, MapPin, ChevronDown, ChevronRight, Download, Eye, FileText } from "lucide-react";
 import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, createShareLink } from "../lib/reportsApi";
 import SignaturePad from "../components/SignaturePad";
 import { generateServiceReportPDF, getReportPDFArrayBuffer, getReportPDFFilename } from "../lib/generateReport";
+import { getSummaryPDFArrayBuffer, getSummaryPDFFilename } from "../lib/generateSummaryPDF";
 import PDFPreviewModal from "../components/PDFPreviewModal";
+import SummaryPreviewModal from "../components/SummaryPreviewModal";
 
 function sectionSummary(section) {
   if (!section) return { checked: 0, remarks: 0 };
@@ -31,6 +33,7 @@ export default function CustomerSignBatch({ idsProp }) {
   const [submitting, setSubmitting] = useState(false);
   const [justSigned, setJustSigned] = useState(false);
   const [previewReport, setPreviewReport] = useState(null);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
 
   // If user opens a legacy long URL directly, auto-shorten the browser address bar to /s/:token
   useEffect(() => {
@@ -47,6 +50,15 @@ export default function CustomerSignBatch({ idsProp }) {
     try {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
+
+      // Include the Summary PDF in the root of the ZIP
+      try {
+        const summaryBytes = getSummaryPDFArrayBuffer(reports);
+        const summaryFilename = getSummaryPDFFilename(reports);
+        zip.file(summaryFilename, summaryBytes);
+      } catch (err) {
+        console.warn("Could not include summary PDF in zip:", err);
+      }
 
       for (const report of reports) {
         const folderName = report.templateName || "Service Reports";
@@ -198,14 +210,26 @@ export default function CustomerSignBatch({ idsProp }) {
       </header>
 
       <main className="mx-auto max-w-xl space-y-4 px-4 py-5">
-        {reports.length > 1 && (
-          <button
-            type="button"
-            onClick={downloadAllPDFs}
-            className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-navy-800 py-2.5 text-sm font-bold text-navy-800 hover:bg-navy-50"
-          >
-            <Download size={16} /> Download All PDFs ({reports.length})
-          </button>
+        {reports.length > 0 && (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => setShowSummaryModal(true)}
+              className="flex flex-1 items-center justify-center gap-2 rounded-md bg-teal-700 py-2.5 px-3 text-sm font-bold text-white hover:bg-teal-800 shadow-sm transition"
+            >
+              <FileText size={16} /> View & Download Summary
+            </button>
+
+            {reports.length > 1 && (
+              <button
+                type="button"
+                onClick={downloadAllPDFs}
+                className="flex flex-1 items-center justify-center gap-2 rounded-md border-2 border-navy-800 py-2.5 px-3 text-sm font-bold text-navy-800 hover:bg-navy-50 transition"
+              >
+                <Download size={16} /> Download All PDFs ({reports.length})
+              </button>
+            )}
+          </div>
         )}
 
         {reports.map((report) => (
@@ -386,6 +410,13 @@ export default function CustomerSignBatch({ idsProp }) {
         <PDFPreviewModal
           report={previewReport}
           onClose={() => setPreviewReport(null)}
+        />
+      )}
+
+      {showSummaryModal && (
+        <SummaryPreviewModal
+          reports={reports}
+          onClose={() => setShowSummaryModal(false)}
         />
       )}
     </div>

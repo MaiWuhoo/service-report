@@ -324,6 +324,14 @@ function drawSignatureBlock(
 export function buildReportDoc(report, options = {}) {
   const { spacing = "normal" } = options;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
+
+  const pdfTitle = getReportPDFFilename(report).replace(/\.pdf$/i, "");
+  doc.setProperties({
+    title: pdfTitle,
+    subject: report.templateName || "Service Report",
+    author: report.leadTechnician || "Service Engineer",
+    creator: "Service Report App",
+  });
   let y = 14;
   const spacingMap = {
     compact: { rowH: 7, textGap: 5, remarkH: 20, padding: 3 },
