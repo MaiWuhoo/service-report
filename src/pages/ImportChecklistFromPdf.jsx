@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, FilePlus2, Image } from "lucide-react";
+import { ArrowLeft, FilePlus2, Image as ImageIcon } from "lucide-react";
 import {
   parsePdfTextToTemplate,
   saveParsedPdfTextTemplate,
@@ -24,10 +24,10 @@ export default function ImportChecklistFromPdf() {
   const [showPreview, setShowPreview] = useState(false);
   const [previewHtml, setPreviewHtml] = useState("");
   const editorRef = useRef(null);
-  const [imgMaxWidth, setImgMaxWidth] = useState(1200);
-  const [imgQuality, setImgQuality] = useState(0.8);
+  const [imgMaxWidth, setImgMaxWidth] = useState(2400);
+  const [imgQuality, setImgQuality] = useState(0.9);
   const [ocrLang, setOcrLang] = useState("eng");
-  const [ocrPreprocessMode, setOcrPreprocessMode] = useState("enhanced");
+  const [ocrPreprocessMode, setOcrPreprocessMode] = useState("normal");
   const [ocrRunning, setOcrRunning] = useState(false);
   const [ocrProgress, setOcrProgress] = useState({ current: 0, total: 0 });
   const [isDragOver, setIsDragOver] = useState(false);
@@ -145,12 +145,33 @@ export default function ImportChecklistFromPdf() {
     const compressed = await Promise.all(
       (pageImages || []).map((d) => compressImage(d, imgMaxWidth, imgQuality).catch(() => d)),
     );
-    const parsed = parsePdfTextToTemplate(pageTexts.length > 0 ? pageTexts : text, {
+    const hasEmbeddedText = pageTexts.some((pageText) => pageText.trim().length > 10);
+    let ocrTexts = [];
+    if (!hasEmbeddedText && compressed.length) {
+      setOcrRunning(true);
+      setOcrProgress({ current: 0, total: compressed.length });
+      try {
+        ocrTexts = await runOcrForImages(
+          compressed.map((src) => ({ src, include: true })),
+          ocrLang,
+          (current) => setOcrProgress({ current, total: compressed.length }),
+        );
+      } finally {
+        setOcrRunning(false);
+        setOcrProgress({ current: 0, total: 0 });
+      }
+    }
+    const extractedPages = hasEmbeddedText ? pageTexts : ocrTexts;
+    const parsed = parsePdfTextToTemplate(extractedPages.length > 0 ? extractedPages : text, {
       name: `Imported from ${file.name}`,
       category: "Imported PDF",
     });
-    parsed.pageTexts = pageTexts;
-    parsed.pageImages = (compressed || []).map((src) => ({ src, include: true }));
+    parsed.pageTexts = extractedPages;
+    parsed.pageImages = (compressed || []).map((src, index) => ({
+      src,
+      include: true,
+      ocrText: hasEmbeddedText ? "" : (ocrTexts[index] || ""),
+    }));
     setParsedTemplate(parsed);
     const copy = JSON.parse(JSON.stringify(parsed));
     copy.htmlContent = buildHtmlFromTemplate(copy);
@@ -187,6 +208,9 @@ export default function ImportChecklistFromPdf() {
       setOcrProgress({ current: 0, total: 0 });
     }
 
+    if (!ocrText.trim()) {
+      setError("OCR did not detect readable text. Try a higher-resolution image or Grayscale preprocessing.");
+    }
     // Parse the OCR text into a template structure
     const parsed = parsePdfTextToTemplate(ocrText, {
       name: `Imported from ${file.name}`,
@@ -279,7 +303,7 @@ export default function ImportChecklistFromPdf() {
 
   function compressImage(dataUrl, maxWidth, quality) {
     return new Promise((resolve, reject) => {
-      const img = new Image();
+      const img = new window.Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
         const scale = Math.min(1, maxWidth / img.width);
@@ -332,6 +356,9 @@ export default function ImportChecklistFromPdf() {
         copy.htmlContent = buildHtmlFromTemplate(copy);
         return copy;
       });
+      if (!texts.some((text) => text.trim())) {
+        setError("OCR did not detect readable text. Try a higher-resolution image or Grayscale preprocessing.");
+      }
     } catch (e) {
       console.error('OCR error', e);
       setError('OCR failed. See console for details.');
@@ -343,13 +370,14 @@ export default function ImportChecklistFromPdf() {
 
   function preprocessImage(dataUrl, mode) {
     return new Promise((resolve, reject) => {
-      const img = new Image();
+      const img = new window.Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
+        const scale = Math.min(3, Math.max(1, 2200 / Math.max(img.width, img.height)));
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
         for (let i = 0; i < data.length; i += 4) {
@@ -485,27 +513,26 @@ export default function ImportChecklistFromPdf() {
     if (!pageImageObjects || !pageImageObjects.length) return [];
     const worker = await createWorker({ logger: (m) => {} });
     await worker.load();
+    const results = [];
     try {
       await worker.loadLanguage(lang);
       await worker.initialize(lang);
-    } catch (e) {
-      console.warn('Failed to load/initialize Tesseract language', lang, e);
-    }
-    const results = [];
-    for (let i = 0; i < pageImageObjects.length; i += 1) {
-      const src = pageImageObjects[i]?.src || pageImageObjects[i];
-      try {
-        const cleanedSrc = await preprocessImage(src, ocrPreprocessMode);
-        const { data: { text } } = await worker.recognize(cleanedSrc);
-        results.push(text || '');
-      } catch (e) {
-        console.error('OCR page error', e);
-        results.push('');
+      for (let i = 0; i < pageImageObjects.length; i += 1) {
+        const src = pageImageObjects[i]?.src || pageImageObjects[i];
+        try {
+          const cleanedSrc = await preprocessImage(src, ocrPreprocessMode);
+          const { data: { text } } = await worker.recognize(cleanedSrc);
+          results.push(text || '');
+        } catch (e) {
+          console.error('OCR page error', e);
+          results.push('');
+        }
+        progressCb(i + 1);
       }
-      progressCb(i + 1);
+      return results;
+    } finally {
+      await worker.terminate();
     }
-    await worker.terminate();
-    return results;
   }
 
   async function handleSaveTemplate() {
@@ -679,7 +706,7 @@ export default function ImportChecklistFromPdf() {
             </div>
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-700">
-                <Image size={16} />
+                <ImageIcon size={16} />
               </div>
               <div>
                 <p className="text-sm font-semibold text-ink">Images (JPG, PNG, WEBP)</p>
@@ -701,7 +728,7 @@ export default function ImportChecklistFromPdf() {
             }`}
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-navy-100 text-navy-700">
-              <Image size={22} />
+              <ImageIcon size={22} />
             </div>
             <div>
               <p className="text-sm font-bold text-ink">
@@ -815,7 +842,7 @@ export default function ImportChecklistFromPdf() {
                 <label className="text-sm text-muted">Preprocess</label>
                 <select value={ocrPreprocessMode} onChange={(e) => setOcrPreprocessMode(e.target.value)} className="rounded-md border border-border px-2 py-1 text-sm">
                   <option value="enhanced">Enhanced</option>
-                  <option value="normal">Normal</option>
+                  <option value="normal">Grayscale</option>
                 </select>
               </div>
               <button onClick={handleRunOcr} disabled={ocrRunning} className="rounded-md bg-navy-800 px-3 py-1 text-sm font-bold text-white">
