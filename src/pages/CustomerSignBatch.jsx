@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, MapPin, ChevronDown, ChevronRight, Download, Eye } from "lucide-react";
-import { getReport, updateReport, getScheduleEntry, updateScheduleEntry } from "../lib/reportsApi";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, createShareLink } from "../lib/reportsApi";
 import SignaturePad from "../components/SignaturePad";
 import { generateServiceReportPDF, getReportPDFArrayBuffer, getReportPDFFilename } from "../lib/generateReport";
 import PDFPreviewModal from "../components/PDFPreviewModal";
@@ -15,9 +15,13 @@ function sectionSummary(section) {
   return { checked, remarks };
 }
 
-export default function CustomerSignBatch() {
-  const { ids } = useParams();
-  const reportIds = (ids ?? "").split(",").filter(Boolean);
+export default function CustomerSignBatch({ idsProp }) {
+  const { ids: paramIds } = useParams();
+  const rawIds = idsProp || paramIds;
+  const reportIds = Array.isArray(rawIds)
+    ? rawIds
+    : (rawIds ?? "").split(",").filter(Boolean);
+  const reportIdsKey = reportIds.join(",");
 
   const [reports, setReports] = useState(null);
   const [notFound, setNotFound] = useState(false);
@@ -27,6 +31,17 @@ export default function CustomerSignBatch() {
   const [submitting, setSubmitting] = useState(false);
   const [justSigned, setJustSigned] = useState(false);
   const [previewReport, setPreviewReport] = useState(null);
+
+  // If user opens a legacy long URL directly, auto-shorten the browser address bar to /s/:token
+  useEffect(() => {
+    if (paramIds && !idsProp && reportIds.length > 0) {
+      createShareLink(reportIds, "batch")
+        .then((token) => {
+          window.history.replaceState(null, "", `/s/${token}`);
+        })
+        .catch(() => {});
+    }
+  }, [paramIds, idsProp, reportIdsKey]);
 
   async function downloadAllPDFs() {
     try {
@@ -72,7 +87,7 @@ export default function CustomerSignBatch() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids]);
+  }, [reportIdsKey]);
 
   function clearCanvas() {
     const canvas = canvasRef.current;
@@ -203,11 +218,21 @@ export default function CustomerSignBatch() {
                 <p className="text-xs font-semibold uppercase text-muted">
                   {report.reportId}
                 </p>
-                {report.templateName && (
-                  <span className="rounded bg-navy-50 px-2 py-0.5 text-xs font-bold text-navy-800">
-                    {report.templateName}
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {report.templateName && (
+                    <span className="rounded bg-navy-50 px-2 py-0.5 text-xs font-bold text-navy-800">
+                      {report.templateName}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPreviewReport(report)}
+                    title="Preview PDF"
+                    className="flex items-center gap-1 rounded-md border border-navy-800 px-2 py-0.5 text-xs font-semibold text-navy-800 hover:bg-navy-50"
+                  >
+                    <Eye size={12} /> Preview
+                  </button>
+                </div>
               </div>
               <p className="flex items-center gap-1 font-bold text-ink mt-1">
                 <MapPin size={14} className="text-navy-700" />{" "}

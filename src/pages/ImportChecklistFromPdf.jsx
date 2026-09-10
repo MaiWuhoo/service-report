@@ -1,6 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, FilePlus2 } from "lucide-react";
+import { ArrowLeft, FilePlus2, Image } from "lucide-react";
 import {
   parsePdfTextToTemplate,
   saveParsedPdfTextTemplate,
@@ -30,6 +30,79 @@ export default function ImportChecklistFromPdf() {
   const [ocrPreprocessMode, setOcrPreprocessMode] = useState("enhanced");
   const [ocrRunning, setOcrRunning] = useState(false);
   const [ocrProgress, setOcrProgress] = useState({ current: 0, total: 0 });
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dropZoneRef = useRef(null);
+
+  // Global paste handler: Ctrl+V anywhere on the page pastes clipboard image
+  useEffect(() => {
+    async function handlePaste(e) {
+      if (loading || ocrRunning) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (!file) continue;
+          setFileName(`pasted-image.${item.type.split("/")[1] || "png"}`);
+          setError(null);
+          setLoading(true);
+          try {
+            await handleImageImport(file);
+          } catch (err) {
+            setError(`Failed to read pasted image: ${err.message}`);
+          } finally {
+            setLoading(false);
+          }
+          break;
+        }
+      }
+    }
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [loading, ocrRunning]);
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave() {
+    setIsDragOver(false);
+  }
+
+  async function handleDrop(e) {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (loading || ocrRunning) return;
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const isImg = isImageFile(file);
+    if (!isPdf && !isImg) {
+      setError("Please drop a PDF or image file.");
+      return;
+    }
+    setFileName(file.name);
+    setError(null);
+    setLoading(true);
+    try {
+      if (isImg) {
+        await handleImageImport(file);
+      } else {
+        await handlePdfImport(file);
+      }
+    } catch (err) {
+      setError(`Failed to import file: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/bmp", "image/tiff"];
+
+  function isImageFile(file) {
+    return IMAGE_TYPES.includes(file.type) || /\.(jpe?g|png|webp|bmp|tiff?)$/i.test(file.name);
+  }
 
   async function handleFileChange(event) {
     setError(null);
@@ -37,8 +110,10 @@ export default function ImportChecklistFromPdf() {
     if (!file) return;
 
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-    if (!isPdf) {
-      setError("Please select a PDF file.");
+    const isImg = isImageFile(file);
+
+    if (!isPdf && !isImg) {
+      setError("Please select a PDF or image file (JPG, PNG, WEBP, BMP).");
       return;
     }
 
@@ -46,35 +121,84 @@ export default function ImportChecklistFromPdf() {
     setLoading(true);
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const { text, pageImages, pageTexts } = await extractPdfContent(arrayBuffer);
-      // compress/resize images according to current settings
-      const compressed = await Promise.all(
-        (pageImages || []).map((d) => compressImage(d, imgMaxWidth, imgQuality).catch(() => d)),
-      );
-      const parsed = parsePdfTextToTemplate(pageTexts.length > 0 ? pageTexts : text, {
-        name: `Imported from ${file.name}`,
-        category: "Imported PDF",
-      });
-      parsed.pageTexts = pageTexts;
-      parsed.pageImages = (compressed || []).map((src) => ({ src, include: true }));
-      setParsedTemplate(parsed);
-      const copy = JSON.parse(JSON.stringify(parsed));
-      // build initial HTML with images
-      copy.htmlContent = buildHtmlFromTemplate(copy);
-      setEditableTemplate(copy);
-      // set editor content via state
-      setEditorHtml(copy.htmlContent || "");
+      if (isImg) {
+        await handleImageImport(file);
+      } else {
+        await handlePdfImport(file);
+      }
     } catch (err) {
-      console.error("PDF import failed:", err);
+      console.error("File import failed:", err);
       setError(
         err?.message
-          ? `Failed to import PDF: ${err.message}`
-          : "Failed to import PDF. Please check the file and try again.",
+          ? `Failed to import file: ${err.message}`
+          : "Failed to import file. Please check the file and try again.",
       );
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handlePdfImport(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const { text, pageImages, pageTexts } = await extractPdfContent(arrayBuffer);
+    // compress/resize images according to current settings
+    const compressed = await Promise.all(
+      (pageImages || []).map((d) => compressImage(d, imgMaxWidth, imgQuality).catch(() => d)),
+    );
+    const parsed = parsePdfTextToTemplate(pageTexts.length > 0 ? pageTexts : text, {
+      name: `Imported from ${file.name}`,
+      category: "Imported PDF",
+    });
+    parsed.pageTexts = pageTexts;
+    parsed.pageImages = (compressed || []).map((src) => ({ src, include: true }));
+    setParsedTemplate(parsed);
+    const copy = JSON.parse(JSON.stringify(parsed));
+    copy.htmlContent = buildHtmlFromTemplate(copy);
+    setEditableTemplate(copy);
+    setEditorHtml(copy.htmlContent || "");
+  }
+
+  async function handleImageImport(file) {
+    // Convert image file to data URL
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    // Compress image
+    const compressed = await compressImage(dataUrl, imgMaxWidth, imgQuality).catch(() => dataUrl);
+
+    // Run OCR on the image
+    setOcrRunning(true);
+    setOcrProgress({ current: 0, total: 1 });
+    let ocrText = "";
+    try {
+      const texts = await runOcrForImages([{ src: compressed, include: true }], ocrLang, () => {
+        setOcrProgress({ current: 1, total: 1 });
+      });
+      ocrText = texts[0] || "";
+    } catch (e) {
+      console.warn("OCR on image failed:", e);
+      ocrText = "";
+    } finally {
+      setOcrRunning(false);
+      setOcrProgress({ current: 0, total: 0 });
+    }
+
+    // Parse the OCR text into a template structure
+    const parsed = parsePdfTextToTemplate(ocrText, {
+      name: `Imported from ${file.name}`,
+      category: "Imported Image",
+    });
+    parsed.pageTexts = [ocrText];
+    parsed.pageImages = [{ src: compressed, include: true, ocrText }];
+    setParsedTemplate(parsed);
+    const copy = JSON.parse(JSON.stringify(parsed));
+    copy.htmlContent = buildHtmlFromTemplate(copy);
+    setEditableTemplate(copy);
+    setEditorHtml(copy.htmlContent || "");
   }
   async function extractPdfContent(arrayBuffer) {
     const data = new Uint8Array(arrayBuffer);
@@ -524,33 +648,90 @@ export default function ImportChecklistFromPdf() {
             <FilePlus2 size={22} />
           </div>
           <div>
-            <h1 className="text-2xl font-extrabold text-ink">Import Checklist from PDF</h1>
+            <h1 className="text-2xl font-extrabold text-ink">Import Checklist from PDF or Image</h1>
             <p className="text-sm text-muted">
-              Upload a checklist PDF and convert its contents into an editable template.
+              Upload a checklist PDF or photo/image — the app will extract text automatically using OCR.
             </p>
           </div>
         </div>
 
         <div className="mt-6 space-y-4">
-          <label className="block text-sm font-semibold text-ink">PDF file</label>
+          <label className="block text-sm font-semibold text-ink">PDF or Image file</label>
           <input
             type="file"
-            accept="application/pdf"
+            accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp,image/bmp,image/tiff"
             onChange={handleFileChange}
-            disabled={loading}
+            disabled={loading || ocrRunning}
             className="w-full rounded-md border border-border bg-white px-3 py-2 text-sm"
           />
           {fileName && <p className="text-sm text-muted">Selected: {fileName}</p>}
           {error && <p className="text-sm text-danger-600">{error}</p>}
-          <p className="text-sm text-muted">
-            The PDF text extraction will try to find section headings and checklist items. For best results, use a simple structured checklist layout.
-          </p>
+
+          <div className="grid gap-3 rounded-lg border border-border bg-surface p-4 md:grid-cols-2">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-100 text-navy-800">
+                <FilePlus2 size={16} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-ink">PDF Documents</p>
+                <p className="text-xs text-muted">Text is extracted directly from PDF structure.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-700">
+                <Image size={16} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-ink">Images (JPG, PNG, WEBP)</p>
+                <p className="text-xs text-muted">Text is read from photos using OCR technology automatically.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Paste / Drag-and-Drop zone */}
+          <div
+            ref={dropZoneRef}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed py-7 px-5 text-center transition-colors ${
+              isDragOver
+                ? "border-teal-500 bg-teal-50"
+                : "border-border bg-surface hover:border-navy-400"
+            }`}
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-navy-100 text-navy-700">
+              <Image size={22} />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-ink">
+                {isDragOver ? "Drop it here!" : "Paste or drag image here"}
+              </p>
+              <p className="mt-0.5 text-xs text-muted">
+                Copy a screenshot and press <kbd className="rounded border border-border bg-white px-1.5 py-0.5 font-mono text-xs shadow-sm">Ctrl+V</kbd> anywhere, or drag &amp; drop an image file
+              </p>
+            </div>
+          </div>
+
+          {ocrRunning && (
+            <div className="rounded-lg border border-teal-200 bg-teal-50 p-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-teal-800">
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Reading image with OCR… {ocrProgress.total > 0 ? `(${ocrProgress.current}/${ocrProgress.total})` : ""}
+              </div>
+              <p className="mt-1 text-xs text-teal-700">This may take a moment. Please wait.</p>
+            </div>
+          )}
+
           <button
             onClick={() => document.querySelector("input[type=file]")?.click()}
-            className="inline-flex items-center gap-2 rounded-md bg-navy-800 px-4 py-2.5 text-sm font-bold text-white hover:bg-navy-700"
-            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-md bg-navy-800 px-4 py-2.5 text-sm font-bold text-white hover:bg-navy-700 disabled:opacity-60"
+            disabled={loading || ocrRunning}
           >
-            {loading ? "Importing…" : "Choose PDF"}
+            {loading ? "Importing…" : ocrRunning ? "Reading image…" : "Choose PDF or Image"}
           </button>
         </div>
       </div>

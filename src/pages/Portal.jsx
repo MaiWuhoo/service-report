@@ -20,6 +20,8 @@ import {
   listCustomers,
   getReport,
   updateScheduleEntry,
+  createShareLink,
+  copyToClipboard,
 } from "../lib/reportsApi";
 import { createReportFromTemplate } from "../lib/createReportFromTemplate";
 import { reportResumeUrl } from "../lib/reportResumeUrl";
@@ -156,13 +158,14 @@ export default function Portal() {
 
   async function handleShareReport(e, report) {
     e.stopPropagation();
-    const url = `${window.location.origin}/sign/${report.id}`;
     try {
-      await navigator.clipboard.writeText(url);
+      const token = await createShareLink([report.id], "single");
+      const url = `${window.location.origin}/s/${token}`;
+      await copyToClipboard(url);
       setCopiedShareId(report.id);
       setTimeout(() => setCopiedShareId(null), 2000);
-    } catch {
-      window.prompt("Copy this link:", url);
+    } catch (err) {
+      console.error("handleShareReport error:", err);
     }
   }
 
@@ -277,7 +280,7 @@ export default function Portal() {
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-ink">
-                Date of Service
+                Inspection Date
               </label>
               <input
                 type="date"
@@ -339,7 +342,7 @@ export default function Portal() {
             <thead>
               <tr className="bg-surface text-left text-xs font-semibold uppercase text-muted">
                 <th className="px-5 py-3">Project Name</th>
-                <th className="px-5 py-3">Date</th>
+                <th className="px-5 py-3">Inspection Date</th>
                 <th className="px-5 py-3">Location</th>
                 <th className="px-5 py-3">Technician</th>
                 <th className="px-5 py-3">Status</th>

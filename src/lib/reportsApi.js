@@ -308,3 +308,92 @@ export async function createChecklistTemplate(data) {
   });
   return ref.id;
 }
+
+// ── Short share links ──────────────────────────────────────────────────────────
+const shareLinksCol = collection(db, "shareLinks");
+
+/** Generate a cryptographically random 8-char alphanumeric token. */
+function generateToken(len = 8) {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (b) => chars[b % chars.length]).join("");
+}
+
+/**
+ * Creates a short share link document in Firestore.
+ * Returns the short token (8 chars).
+ * @param {string[]} reportIds  - Array of report IDs to share
+ * @param {"single"|"batch"} mode - Whether this is a single or batch sign-off
+ */
+export async function createShareLink(reportIds, mode = "batch") {
+  const token = generateToken();
+  const payload = {
+    reportIds,
+    mode,
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    localStorage.setItem(`sr_share_${token}`, JSON.stringify(payload));
+  } catch {}
+
+  try {
+    await setDoc(doc(db, "shareLinks", token), {
+      reportIds,
+      mode,
+      createdAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.warn("Firestore share link save notice:", err);
+  }
+  return token;
+}
+
+/**
+ * Looks up a short share token and returns its payload.
+ * Returns null if not found.
+ */
+export async function getShareLink(token) {
+  try {
+    const snap = await getDoc(doc(db, "shareLinks", token));
+    if (snap.exists()) return snap.data();
+  } catch (err) {
+    console.warn("Firestore share link lookup notice:", err);
+  }
+  try {
+    const local = localStorage.getItem(`sr_share_${token}`);
+    if (local) return JSON.parse(local);
+  } catch {}
+  return null;
+}
+
+/**
+ * Robust copy to clipboard helper with execCommand and prompt fallback.
+ */
+export async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) {
+    console.warn("navigator.clipboard failed:", e);
+  }
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    textArea.style.top = "0";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const successful = document.execCommand("copy");
+    document.body.removeChild(textArea);
+    if (successful) return true;
+  } catch (e) {
+    console.warn("execCommand fallback failed:", e);
+  }
+  window.prompt("Copy this link:", text);
+  return true;
+}

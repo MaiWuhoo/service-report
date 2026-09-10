@@ -21,6 +21,8 @@ import {
   saveManagerSignatures,
   autoSaveManagerSignature,
   autoSaveEngineerSignature,
+  createShareLink,
+  copyToClipboard,
 } from "../lib/reportsApi";
 import { generateServiceReportPDF } from "../lib/generateReport";
 import { compressImageToBlob } from "../lib/fileUtils";
@@ -108,13 +110,14 @@ export default function ReviewSignoff() {
   }
 
   async function handleCopySignLink() {
-    const url = `${window.location.origin}/sign/${id}`;
     try {
-      await navigator.clipboard.writeText(url);
+      const token = await createShareLink([id], "single");
+      const url = `${window.location.origin}/s/${token}`;
+      await copyToClipboard(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
-    } catch {
-      window.prompt("Copy this link:", url);
+    } catch (err) {
+      console.error("handleCopySignLink error:", err);
     }
   }
 

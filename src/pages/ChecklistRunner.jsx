@@ -222,7 +222,7 @@ export default function ChecklistRunner() {
         <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-surface p-3 text-sm">
           <div>
             <label className="text-xs text-muted" htmlFor="date-of-service">
-              Date of Service
+              Inspection Date
             </label>
             <input
               id="date-of-service"

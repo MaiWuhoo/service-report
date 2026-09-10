@@ -191,7 +191,7 @@ function drawMetaRow(doc, report, y, rowH) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
   doc.setTextColor(20, 20, 20);
-  doc.text("Date of Service:", MARGIN + 2, y + 5.2);
+  doc.text("Inspection Date:", MARGIN + 2, y + 5.2);
   doc.text("Location Door:", MARGIN + colW + 2, y + 5.2);
 
   doc.setFont("helvetica", "normal");
