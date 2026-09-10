@@ -67,7 +67,7 @@ export default function ReportMedia() {
             <p className="font-bold text-ink">{report.reportId}</p>
           </div>
           <div>
-            <p className="text-xs font-semibold uppercase text-muted">Date of Service</p>
+            <p className="text-xs font-semibold uppercase text-muted">Inspection Date</p>
             <p className="font-bold text-ink">{report.dateOfService}</p>
           </div>
           <div>

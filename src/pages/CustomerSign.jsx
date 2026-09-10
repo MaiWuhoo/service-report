@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, MapPin, Eye, ChevronDown, ChevronRight, Upload, X, Download } from "lucide-react";
-import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, autoSaveManagerSignature } from "../lib/reportsApi";
+import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, autoSaveManagerSignature, createShareLink } from "../lib/reportsApi";
 import { readFileAsDataURL } from "../lib/fileUtils";
 import SignaturePad from "../components/SignaturePad";
 import PDFPreviewModal from "../components/PDFPreviewModal";
@@ -15,8 +15,9 @@ function sectionSummary(section) {
   return { checked, remarks };
 }
 
-export default function CustomerSign() {
-  const { id } = useParams();
+export default function CustomerSign({ idProp }) {
+  const { id: paramId } = useParams();
+  const id = idProp || paramId;
   const [report, setReport] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [customerName, setCustomerName] = useState("");
@@ -27,6 +28,16 @@ export default function CustomerSign() {
   const [previewReport, setPreviewReport] = useState(null);
   const [expandedSections, setExpandedSections] = useState([]);
   const [previewImage, setPreviewImage] = useState(null);
+
+  useEffect(() => {
+    if (paramId && !idProp && id) {
+      createShareLink([id], "single")
+        .then((token) => {
+          window.history.replaceState(null, "", `/s/${token}`);
+        })
+        .catch(() => {});
+    }
+  }, [paramId, idProp, id]);
 
   useEffect(() => {
     (async () => {

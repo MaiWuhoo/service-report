@@ -11,8 +11,9 @@ import {
   FileText,
 } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
-import { listRecentReports, deleteReport } from "../lib/reportsApi";
+import { listRecentReports, deleteReport, createShareLink, copyToClipboard } from "../lib/reportsApi";
 import { reportResumeUrl } from "../lib/reportResumeUrl";
+
 import { generateServiceReportPDF } from "../lib/generateReport";
 import {
   generateSummaryPDF,
@@ -94,13 +95,14 @@ export default function Reports() {
   }
 
   async function handleShare(report) {
-    const url = `${window.location.origin}/sign/${report.id}`;
     try {
-      await navigator.clipboard.writeText(url);
+      const token = await createShareLink([report.id], "single");
+      const url = `${window.location.origin}/s/${token}`;
+      await copyToClipboard(url);
       setCopiedId(report.id);
       setTimeout(() => setCopiedId(null), 2000);
-    } catch {
-      window.prompt("Copy this link:", url);
+    } catch (err) {
+      console.error("handleShare error:", err);
     }
   }
 
@@ -133,13 +135,14 @@ export default function Reports() {
   async function handleShareBatch() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
-    const url = `${window.location.origin}/sign-batch/${ids.join(",")}`;
     try {
-      await navigator.clipboard.writeText(url);
+      const token = await createShareLink(ids, "batch");
+      const url = `${window.location.origin}/s/${token}`;
+      await copyToClipboard(url);
       setBatchCopied(true);
       setTimeout(() => setBatchCopied(false), 2500);
-    } catch {
-      window.prompt("Copy this link:", url);
+    } catch (err) {
+      console.error("handleShareBatch error:", err);
     }
   }
 

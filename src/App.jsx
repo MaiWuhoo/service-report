@@ -9,6 +9,7 @@ import AddCustomer from "./pages/AddCustomer";
 import ReviewSignoff from "./pages/ReviewSignoff";
 import CustomerSign from "./pages/CustomerSign";
 import CustomerSignBatch from "./pages/CustomerSignBatch";
+import ShareLinkRedirect from "./pages/ShareLinkRedirect";
 import ScheduleMaintenance from "./pages/ScheduleMaintenance";
 import ScheduleForms from "./pages/ScheduleForms";
 import FullCalendar from "./pages/FullCalendar";
@@ -29,6 +30,7 @@ export default function App() {
             see this one report. */}
         <Route path="/sign/:id" element={<CustomerSign />} />
         <Route path="/sign-batch/:ids" element={<CustomerSignBatch />} />
+        <Route path="/s/:token" element={<ShareLinkRedirect />} />
 
         <Route element={<Layout />}>
           <Route path="/" element={<Portal />} />
