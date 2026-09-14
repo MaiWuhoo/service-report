@@ -25,7 +25,7 @@ import {
   copyToClipboard,
 } from "../lib/reportsApi";
 import { generateServiceReportPDF } from "../lib/generateReport";
-import { compressImageToBlob } from "../lib/fileUtils";
+import { compressImageToBlob, getCanvasSignature } from "../lib/fileUtils";
 import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 import SignaturePad from "../components/SignaturePad";
 import PDFPreviewModal from "../components/PDFPreviewModal";
@@ -63,6 +63,7 @@ export default function ReviewSignoff() {
     useState(null);
   const [editingSignatureId, setEditingSignatureId] = useState(null);
   const [editingSignatureName, setEditingSignatureName] = useState("");
+  const [showEngineerCorrection, setShowEngineerCorrection] = useState(false);
 
   const [managerName, setManagerName] = useState("");
   const managerCanvasRef = useRef(null);
@@ -92,7 +93,7 @@ export default function ReviewSignoff() {
   function openPreview() {
     let finalMgrSig = managerSignatureUrl;
     if (showManagerPad && managerCanvasRef.current) {
-      const drawn = managerCanvasRef.current.toDataURL("image/png");
+      const drawn = getCanvasSignature(managerCanvasRef.current);
       if (drawn) finalMgrSig = drawn;
     }
     setPreviewReport({
@@ -143,10 +144,18 @@ export default function ReviewSignoff() {
     if (!id || !report) return;
     setSavingEngineerDate(true);
     setEngineerDateMessage("");
+    const engineerSignature = selectedSignatureDataUrl || report.engineerSignature;
     try {
-      await updateReport(id, { engineerDate });
-      setReport((prev) => ({ ...prev, engineerDate }));
-      setEngineerDateMessage("Date saved successfully.");
+      const payload = {
+        engineerName,
+        engineerSignature,
+        engineerDate,
+      };
+      await updateReport(id, payload);
+      setReport((prev) => ({ ...prev, ...payload }));
+      setSelectedSignatureDataUrl(engineerSignature || null);
+      setEngineerSignMessage("Engineer signature and date saved successfully.");
+      setEngineerDateMessage("Signature and date saved successfully.");
     } catch (err) {
       alert(`Gagal simpan tarikh jurutera: ${err.message}`);
     } finally {
@@ -228,7 +237,7 @@ export default function ReviewSignoff() {
 
     let finalSig = managerSignatureUrl;
     if (showManagerPad && managerCanvasRef.current) {
-      const drawn = managerCanvasRef.current.toDataURL("image/png");
+      const drawn = getCanvasSignature(managerCanvasRef.current);
       if (drawn) finalSig = drawn;
     }
 
@@ -265,7 +274,7 @@ export default function ReviewSignoff() {
   async function saveNewManagerSignatureToSaved() {
     let sigData = managerSignatureUrl;
     if (showManagerPad && managerCanvasRef.current) {
-      sigData = managerCanvasRef.current.toDataURL("image/png");
+      sigData = getCanvasSignature(managerCanvasRef.current);
     }
     if (!managerName?.trim()) {
       alert("Please enter Manager/Team Name first.");
@@ -301,7 +310,9 @@ export default function ReviewSignoff() {
     if (!id || !report) return;
     setSavingEngineerSign(true);
     setEngineerSignMessage("");
-    const engineerSignature = engineerCanvasRef.current?.toDataURL("image/png");
+    const engineerSignature =
+      getCanvasSignature(engineerCanvasRef.current) ||
+      selectedSignatureDataUrl;
     if (!engineerName?.trim()) {
       alert("Please enter the engineer's name before saving the signature.");
       setSavingEngineerSign(false);
@@ -347,11 +358,16 @@ export default function ReviewSignoff() {
   async function approve() {
     if (!id || !report) return;
     const engineerSignature =
-      engineerCanvasRef.current?.toDataURL("image/png") ||
+      getCanvasSignature(engineerCanvasRef.current) ||
+      selectedSignatureDataUrl ||
       report.engineerSignature;
+    if (!engineerSignature) {
+      alert("Please sign in the signature box before finalizing.");
+      return;
+    }
     let finalMgrSig = managerSignatureUrl;
     if (showManagerPad && managerCanvasRef.current) {
-      const drawn = managerCanvasRef.current.toDataURL("image/png");
+      const drawn = getCanvasSignature(managerCanvasRef.current);
       if (drawn) finalMgrSig = drawn;
     }
 
@@ -568,6 +584,29 @@ export default function ReviewSignoff() {
           <h3 className="mb-4 text-sm font-bold uppercase text-navy-800">
             Sign-off Record
           </h3>
+          {savedEngineerSignatures.length > 0 && (
+            <div className="mb-4 rounded-lg border border-border bg-surface p-3">
+              <p className="mb-2 text-xs font-semibold uppercase text-navy-800">
+                Saved Engineer Names
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {savedEngineerSignatures.map((signature) => (
+                  <button
+                    key={signature.id}
+                    type="button"
+                    onClick={() => selectEngineerSignature(signature)}
+                    className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${
+                      report.engineerName === signature.name
+                        ? "border-navy-800 bg-navy-800 text-white"
+                        : "border-border bg-white text-ink hover:bg-navy-50"
+                    }`}
+                  >
+                    {signature.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-lg border border-border p-4">
               <p className="mb-1 text-xs font-bold uppercase text-navy-800">
@@ -601,7 +640,10 @@ export default function ReviewSignoff() {
                     onClick={saveEngineerDate}
                     disabled={
                       savingEngineerDate ||
-                      engineerDate === (report.engineerDate || "")
+                      (engineerDate === (report.engineerDate || "") &&
+                        engineerName === (report.engineerName || "") &&
+                        (selectedSignatureDataUrl || report.engineerSignature) ===
+                          report.engineerSignature)
                     }
                     className="rounded-md bg-navy-800 px-3 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -743,6 +785,48 @@ export default function ReviewSignoff() {
                             >
                               Remove
                             </button>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setShowEngineerCorrection((visible) => !visible)}
+                          className="mt-3 text-xs font-semibold text-navy-700 hover:underline"
+                        >
+                          {showEngineerCorrection ? "Cancel correction" : "Replace engineer signature"}
+                        </button>
+                        {showEngineerCorrection && (
+                          <div className="mt-3 space-y-3">
+                            <SignaturePad
+                              label=""
+                              name={engineerName}
+                              onNameChange={setEngineerName}
+                              canvasRef={engineerCanvasRef}
+                              onClear={() => clearCanvas(engineerCanvasRef)}
+                              signatureDataUrl={selectedSignatureDataUrl}
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              {savedEngineerSignatures.map((signature) => (
+                                <button
+                                  key={signature.id}
+                                  type="button"
+                                  onClick={() => selectEngineerSignature(signature)}
+                                  className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-navy-800 hover:bg-navy-50"
+                                >
+                                  Use {signature.name}
+                                </button>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={saveEngineerSign}
+                                disabled={savingEngineerSign}
+                                className="rounded-md bg-teal-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                              >
+                                {savingEngineerSign ? "Saving..." : "Save replacement"}
+                              </button>
+                            </div>
+                            {engineerSignMessage && (
+                              <p className="text-xs font-semibold text-teal-600">{engineerSignMessage}</p>
+                            )}
                           </div>
                         )}
                       </div>

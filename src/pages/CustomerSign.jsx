@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, MapPin, Eye, ChevronDown, ChevronRight, Upload, X, Download } from "lucide-react";
 import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, autoSaveManagerSignature, createShareLink } from "../lib/reportsApi";
-import { readFileAsDataURL } from "../lib/fileUtils";
+import { getCanvasSignature, readFileAsDataURL } from "../lib/fileUtils";
 import SignaturePad from "../components/SignaturePad";
 import PDFPreviewModal from "../components/PDFPreviewModal";
 import ImagePreviewModal from "../components/ImagePreviewModal";
@@ -66,7 +66,11 @@ export default function CustomerSign({ idProp }) {
       alert("Please enter your name before signing.");
       return;
     }
-    const dataUrl = canvasRef.current?.toDataURL("image/png");
+    const dataUrl = getCanvasSignature(canvasRef.current);
+    if (!dataUrl) {
+      alert("Please sign in the signature box before submitting.");
+      return;
+    }
     setSubmitting(true);
     try {
       // Writes to the same fields the internal "Verified by Manager/Team" box

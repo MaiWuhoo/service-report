@@ -7,6 +7,17 @@ export function readFileAsDataURL(file) {
   });
 }
 
+export function getCanvasSignature(canvas) {
+  if (!canvas) return null;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  for (let i = 3; i < pixels.length; i += 4) {
+    if (pixels[i] > 0) return canvas.toDataURL("image/png");
+  }
+  return null;
+}
+
 /** Reads an image file, downscales it, and returns a compressed JPEG data
  *  URL — full camera photos are several MB, which is both slow to store in
  *  Firestore and unnecessary for a checklist thumbnail/report photo. */

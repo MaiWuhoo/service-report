@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { CheckCircle2, MapPin, ChevronDown, ChevronRight, Download, Eye, FileText } from "lucide-react";
 import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, createShareLink } from "../lib/reportsApi";
 import SignaturePad from "../components/SignaturePad";
+import { getCanvasSignature } from "../lib/fileUtils";
 import { generateServiceReportPDF, getReportPDFArrayBuffer, getReportPDFFilename } from "../lib/generateReport";
 import { getSummaryPDFArrayBuffer, getSummaryPDFFilename } from "../lib/generateSummaryPDF";
 import PDFPreviewModal from "../components/PDFPreviewModal";
@@ -111,7 +112,11 @@ export default function CustomerSignBatch({ idsProp }) {
       alert("Please enter your name before signing.");
       return;
     }
-    const dataUrl = canvasRef.current?.toDataURL("image/png");
+    const dataUrl = getCanvasSignature(canvasRef.current);
+    if (!dataUrl) {
+      alert("Please sign in the signature box before submitting.");
+      return;
+    }
     setSubmitting(true);
     try {
       const payload = {
