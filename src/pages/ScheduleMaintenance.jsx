@@ -10,6 +10,7 @@ import {
   listCustomers,
   listAllSchedule,
   getCompanyProfile,
+  syncReportsFromSchedule,
 } from "../lib/reportsApi";
 import { DEFAULT_TEMPLATE } from "../lib/defaultTemplates";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -158,6 +159,7 @@ export default function ScheduleMaintenance() {
                     },
                   ]))
               .map((sel) => ({
+                ...sel,
                 id: sel.id ?? createSelection(sel.templateId, sel.location ?? entry.location ?? "").id,
                 templateId: sel.templateId,
                 formCount: sel.formCount ?? 1,
@@ -417,6 +419,7 @@ export default function ScheduleMaintenance() {
 
       if (isEditing) {
         await updateScheduleEntry(id, payload);
+        await syncReportsFromSchedule({ id, ...payload });
       } else {
         await createScheduleEntry({ ...payload, status: "upcoming" });
       }
