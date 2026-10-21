@@ -206,12 +206,11 @@ function drawEngineerRow(doc, report, y, rowH) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
   doc.text("Engineer/ Technician (s):", MARGIN + 2, y + 4.8);
-  doc.setFont("helvetica", "normal");
-  doc.text(
-    String(report.leadTechnician ?? report.engineerName ?? "-"),
-    MARGIN + 42,
-    y + 4.8,
-  );
+  const techDisplay =
+    report.leadTechnician && report.leadTechnician !== "Unassigned"
+      ? report.leadTechnician
+      : report.engineerName || report.leadTechnician || "-";
+  doc.text(String(techDisplay), MARGIN + 42, y + 4.8);
   return y + rowH;
 }
 

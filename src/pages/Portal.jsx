@@ -19,6 +19,8 @@ import {
   listChecklistTemplates,
   listCustomers,
   getReport,
+  updateReport,
+  getScheduleEntry,
   updateScheduleEntry,
   createShareLink,
   copyToClipboard,
@@ -112,6 +114,64 @@ export default function Portal() {
         setSchedule(upcoming);
         setTemplates([DEFAULT_TEMPLATE, ...customTemplates]);
         setCustomers(customerList);
+
+        // Auto-sync reports whose schedule has updated technician or location
+        const reportsWithSchedule = reports.filter((r) => r.scheduleId);
+        if (reportsWithSchedule.length > 0) {
+          const scheduleIds = [...new Set(reportsWithSchedule.map((r) => r.scheduleId))];
+          const scheduleEntries = await Promise.all(
+            scheduleIds.map(async (sId) => {
+              const fromUpcoming = upcoming.find((s) => s.id === sId);
+              if (fromUpcoming) return fromUpcoming;
+              try {
+                return await getScheduleEntry(sId);
+              } catch {
+                return null;
+              }
+            })
+          );
+          const scheduleMap = new Map();
+          scheduleEntries.filter(Boolean).forEach((s) => scheduleMap.set(s.id, s));
+
+          let hadUpdates = false;
+          const updatedRecent = await Promise.all(
+            reports.map(async (r) => {
+              if (!r.scheduleId) return r;
+              const sched = scheduleMap.get(r.scheduleId);
+              if (!sched) return r;
+
+              const sel = Array.isArray(sched.templateSelections)
+                ? sched.templateSelections.find((s) => s.reportId === r.id || s.templateId === r.templateId)
+                : null;
+
+              const targetTech = (sched.assignedTechnician ?? "").trim();
+              const targetLoc = (sel?.location?.trim() || sched.location?.trim() || "").trim();
+
+              const patch = {};
+              if (targetTech && targetTech !== "Unassigned" && r.leadTechnician !== targetTech) {
+                patch.leadTechnician = targetTech;
+              }
+              if (targetLoc && targetLoc !== "-" && r.locationDoor !== targetLoc) {
+                patch.locationDoor = targetLoc;
+              }
+
+              if (Object.keys(patch).length > 0) {
+                hadUpdates = true;
+                try {
+                  await updateReport(r.id, patch);
+                  return { ...r, ...patch };
+                } catch (e) {
+                  console.error("Error auto-syncing report in Portal:", e);
+                }
+              }
+              return r;
+            })
+          );
+
+          if (hadUpdates) {
+            setRecentReports(updatedRecent);
+          }
+        }
       } catch {
         // Firestore not configured yet — page still renders with empty state
       } finally {

@@ -14,6 +14,7 @@ import {
   runTransaction,
   onSnapshot,
   arrayUnion,
+  where,
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -150,6 +151,127 @@ export async function createScheduleEntry(data) {
     createdAt: serverTimestamp(),
   });
   return ref.id;
+}
+
+/**
+ * Synchronizes details (technician, location, customer, date, stamp) from a
+ * maintenance schedule entry into all linked service reports in Firestore.
+ */
+export async function syncReportsFromSchedule(scheduleEntry) {
+  if (!scheduleEntry || !scheduleEntry.id) return [];
+  const scheduleId = scheduleEntry.id;
+
+  const reportIdMap = new Map();
+  if (Array.isArray(scheduleEntry.templateSelections)) {
+    for (const sel of scheduleEntry.templateSelections) {
+      if (sel.reportId) {
+        reportIdMap.set(sel.reportId, sel);
+      }
+    }
+  }
+  if (scheduleEntry.reportId) {
+    reportIdMap.set(scheduleEntry.reportId, null);
+  }
+
+  let scheduleReports = [];
+  try {
+    const q = query(reportsCol, where("scheduleId", "==", scheduleId));
+    const snap = await getDocs(q);
+    scheduleReports = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.error("Error querying reports by scheduleId:", err);
+  }
+
+  const allReportsMap = new Map();
+  for (const r of scheduleReports) {
+    allReportsMap.set(r.id, r);
+  }
+  for (const [rId] of reportIdMap) {
+    if (!allReportsMap.has(rId)) {
+      try {
+        const r = await getReport(rId);
+        if (r) allReportsMap.set(r.id, r);
+      } catch {}
+    }
+  }
+
+  let customerData = null;
+  if (scheduleEntry.customerId) {
+    try {
+      customerData = await getCustomer(scheduleEntry.customerId);
+    } catch {}
+  }
+
+  const updatedReports = [];
+  const promises = [];
+
+  for (const [rId, report] of allReportsMap) {
+    const sel =
+      reportIdMap.get(rId) ||
+      (Array.isArray(scheduleEntry.templateSelections)
+        ? scheduleEntry.templateSelections.find(
+            (s) => s.templateId === report.templateId
+          )
+        : null);
+
+    const targetTechnician = (scheduleEntry.assignedTechnician ?? "").trim();
+    const targetLocation = (
+      sel?.location?.trim() ||
+      scheduleEntry.location?.trim() ||
+      ""
+    ).trim();
+    const targetDate = scheduleEntry.startDate || "";
+
+    const patch = {};
+
+    if (
+      targetTechnician &&
+      targetTechnician !== "Unassigned" &&
+      report.leadTechnician !== targetTechnician
+    ) {
+      patch.leadTechnician = targetTechnician;
+    }
+
+    if (
+      targetLocation &&
+      targetLocation !== "-" &&
+      report.locationDoor !== targetLocation
+    ) {
+      patch.locationDoor = targetLocation;
+    }
+
+    if (
+      targetDate &&
+      (!report.dateOfService || report.dateOfService === "-")
+    ) {
+      patch.dateOfService = targetDate;
+    }
+
+    if (
+      customerData &&
+      (!report.customer || report.customer.id !== scheduleEntry.customerId)
+    ) {
+      patch.customer = customerData;
+      patch.customerId = scheduleEntry.customerId;
+    }
+
+    if (scheduleEntry.companyStamp && !report.companyStamp) {
+      patch.companyStamp = scheduleEntry.companyStamp;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      promises.push(
+        updateReport(rId, patch)
+          .then(() => {
+            updatedReports.push({ id: rId, ...patch });
+          })
+          .catch((err) => console.error(`Failed to sync report ${rId}:`, err))
+      );
+    }
+  }
+
+  await Promise.all(promises);
+  return updatedReports;
 }
 
 const customersCol = collection(db, "customers");
