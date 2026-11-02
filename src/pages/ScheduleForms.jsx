@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { AlertTriangle } from "lucide-react";
 import { getScheduleEntry, listChecklistTemplates, getChecklistTemplate, updateScheduleEntry, getReport, listRecentReports, syncReportsFromSchedule } from "../lib/reportsApi";
 import StatusBadge from "../components/StatusBadge";
 import { createReportFromTemplate } from "../lib/createReportFromTemplate";
@@ -96,7 +97,10 @@ export default function ScheduleForms() {
               if (selLoc && rLoc) {
                 return rLoc === selLoc;
               }
-              return true;
+              if (!selLoc && !rLoc) {
+                return true;
+              }
+              return false;
             });
 
             if (report) {
@@ -254,9 +258,26 @@ export default function ScheduleForms() {
                 {items.map((sel, idx) => (
                   <div key={sel.id} className="rounded-md bg-white p-3 flex items-center justify-between">
                     <div>
-                      <p className="font-bold text-sm">
-                        {sel.location?.trim() || entry.location?.trim() || (items.length > 1 ? `Form #${idx + 1}` : "Standard Form")}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-sm">
+                          {sel.location?.trim() || entry.location?.trim() || (items.length > 1 ? `Form #${idx + 1}` : "Standard Form")}
+                        </p>
+                        {(() => {
+                          const curLoc = (sel.location || "").trim().toLowerCase();
+                          if (!curLoc) return null;
+                          const isDup = selections.filter(
+                            (s) => (s.location || "").trim().toLowerCase() === curLoc
+                          ).length > 1;
+                          return isDup ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
+                              title="Duplicate location name: another form in this schedule has this location"
+                            >
+                              <AlertTriangle size={11} /> Duplicate Location
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
                       {sel.timestamp && ["in_progress", "verified", "in_review"].includes(sel.status) ? (
                         <p className="text-xs text-muted">{sel.timestamp}</p>
                       ) : (

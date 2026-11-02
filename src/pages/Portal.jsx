@@ -43,6 +43,7 @@ export default function Portal() {
   const [customerId, setCustomerId] = useState("");
   const [recentReports, setRecentReports] = useState([]);
   const [schedule, setSchedule] = useState([]);
+  const [scheduleMap, setScheduleMap] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [showQuickSchedule, setShowQuickSchedule] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -130,22 +131,30 @@ export default function Portal() {
               }
             })
           );
-          const scheduleMap = new Map();
-          scheduleEntries.filter(Boolean).forEach((s) => scheduleMap.set(s.id, s));
+          const schedMap = new Map();
+          scheduleEntries.filter(Boolean).forEach((s) => schedMap.set(s.id, s));
+          setScheduleMap(schedMap);
 
           let hadUpdates = false;
           const updatedRecent = await Promise.all(
             reports.map(async (r) => {
               if (!r.scheduleId) return r;
-              const sched = scheduleMap.get(r.scheduleId);
+              const sched = schedMap.get(r.scheduleId);
               if (!sched) return r;
 
               const sel = Array.isArray(sched.templateSelections)
-                ? sched.templateSelections.find((s) => s.reportId === r.id || s.templateId === r.templateId)
+                ? sched.templateSelections.find((s) => 
+                    (s.reportId && (s.reportId === r.id || s.reportId === r.reportId)) ||
+                    (s.location && r.locationDoor && s.location.trim().toLowerCase() === r.locationDoor.trim().toLowerCase())
+                  )
                 : null;
 
               const targetTech = (sched.assignedTechnician ?? "").trim();
-              const targetLoc = (sel?.location?.trim() || sched.location?.trim() || "").trim();
+              const targetLoc = (
+                sel?.location?.trim() ||
+                (!sched.templateSelections || sched.templateSelections.length <= 1 ? sched.location?.trim() : "") ||
+                ""
+              ).trim();
 
               const patch = {};
               if (targetTech && targetTech !== "Unassigned" && r.leadTechnician !== targetTech) {
@@ -153,6 +162,9 @@ export default function Portal() {
               }
               if (targetLoc && targetLoc !== "-" && r.locationDoor !== targetLoc) {
                 patch.locationDoor = targetLoc;
+              }
+              if (sched.title && r.scheduleTitle !== sched.title) {
+                patch.scheduleTitle = sched.title;
               }
 
               if (Object.keys(patch).length > 0) {
@@ -430,7 +442,17 @@ export default function Portal() {
                   onClick={() => navigate(reportResumeUrl(r))}
                   className="cursor-pointer border-t border-border hover:bg-surface"
                 >
-                  <td className="px-5 py-3.5 font-medium">{r.templateName}</td>
+                  <td className="px-5 py-3.5 font-medium">
+                    <div className="font-semibold text-ink">
+                      {r.scheduleTitle || scheduleMap.get(r.scheduleId)?.title || r.templateName}
+                    </div>
+                    {(r.scheduleTitle || scheduleMap.get(r.scheduleId)?.title) &&
+                      (r.scheduleTitle || scheduleMap.get(r.scheduleId)?.title) !== r.templateName && (
+                        <div className="text-xs font-normal text-muted">
+                          {r.templateName}
+                        </div>
+                      )}
+                  </td>
                   <td className="px-5 py-3.5">{r.dateOfService}</td>
                   <td className="px-5 py-3.5">{r.locationDoor}</td>
                   <td className="px-5 py-3.5">{r.leadTechnician}</td>
@@ -511,11 +533,22 @@ export default function Portal() {
                     {s.startDate} → {s.endDate} ({s.durationDays} days)
                   </p>
                 )}
-                {s.templateName && (
-                  <p className="text-xs text-muted">
-                    Checklist: {s.templateName}
-                  </p>
-                )}
+                {(() => {
+                  let names = "";
+                  if (Array.isArray(s.templateNames) && s.templateNames.length > 0) {
+                    names = s.templateNames.join(", ");
+                  } else if (Array.isArray(s.templateSelections) && s.templateSelections.length > 0) {
+                    const tIds = [...new Set(s.templateSelections.map((sel) => sel.templateId).filter(Boolean))];
+                    const foundNames = tIds.map((tId) => templates.find((t) => t.id === tId)?.name || tId);
+                    if (foundNames.length > 0) names = foundNames.join(", ");
+                  }
+                  if (!names) names = s.templateName;
+                  return names ? (
+                    <p className="text-xs text-muted">
+                      Checklist: {names}
+                    </p>
+                  ) : null;
+                })()}
               </div>
               <StatusBadge status={(() => {
                 if (s.templateSelections && s.templateSelections.length > 0) {

@@ -208,16 +208,21 @@ export async function syncReportsFromSchedule(scheduleEntry) {
   for (const [rId, report] of allReportsMap) {
     const sel =
       reportIdMap.get(rId) ||
+      (report.reportId ? reportIdMap.get(report.reportId) : null) ||
       (Array.isArray(scheduleEntry.templateSelections)
         ? scheduleEntry.templateSelections.find(
-            (s) => s.templateId === report.templateId
+            (s) =>
+              (s.reportId && (s.reportId === rId || s.reportId === report.reportId)) ||
+              (s.location && report.locationDoor && s.location.trim().toLowerCase() === report.locationDoor.trim().toLowerCase())
           )
         : null);
 
     const targetTechnician = (scheduleEntry.assignedTechnician ?? "").trim();
     const targetLocation = (
       sel?.location?.trim() ||
-      scheduleEntry.location?.trim() ||
+      (!scheduleEntry.templateSelections || scheduleEntry.templateSelections.length <= 1
+        ? scheduleEntry.location?.trim()
+        : "") ||
       ""
     ).trim();
     const targetDate = scheduleEntry.startDate || "";
@@ -238,6 +243,10 @@ export async function syncReportsFromSchedule(scheduleEntry) {
       report.locationDoor !== targetLocation
     ) {
       patch.locationDoor = targetLocation;
+    }
+
+    if (scheduleEntry.title && report.scheduleTitle !== scheduleEntry.title) {
+      patch.scheduleTitle = scheduleEntry.title;
     }
 
     if (

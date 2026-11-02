@@ -90,7 +90,7 @@ export default function Reports() {
   const filteredReports = sortedReports.filter((r) => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return true;
-    return [r.templateName, r.locationDoor, r.leadTechnician, r.dateOfService]
+    return [r.templateName, r.scheduleTitle, r.locationDoor, r.leadTechnician, r.dateOfService]
       .some((value) => value?.toLowerCase().includes(query));
   });
 
@@ -98,7 +98,7 @@ export default function Reports() {
   for (const report of filteredReports) {
     let key;
     if (groupBy === "project") {
-      key = report.templateName || "Untitled Project";
+      key = report.scheduleTitle || report.templateName || "Untitled Project";
     } else {
       const rawDate = getReportDate(report);
       key = rawDate !== "Unknown Date" ? formatGroupDate(rawDate) : "No Date Set";
@@ -138,11 +138,19 @@ export default function Reports() {
             if (!sched) return r;
 
             const sel = Array.isArray(sched.templateSelections)
-              ? sched.templateSelections.find((s) => s.reportId === r.id || s.templateId === r.templateId)
+              ? sched.templateSelections.find(
+                  (s) =>
+                    (s.reportId && (s.reportId === r.id || s.reportId === r.reportId)) ||
+                    (s.location && r.locationDoor && s.location.trim().toLowerCase() === r.locationDoor.trim().toLowerCase())
+                )
               : null;
 
             const targetTech = (sched.assignedTechnician ?? "").trim();
-            const targetLoc = (sel?.location?.trim() || sched.location?.trim() || "").trim();
+            const targetLoc = (
+              sel?.location?.trim() ||
+              (!sched.templateSelections || sched.templateSelections.length <= 1 ? sched.location?.trim() : "") ||
+              ""
+            ).trim();
 
             const patch = {};
             if (targetTech && targetTech !== "Unassigned" && r.leadTechnician !== targetTech) {
@@ -150,6 +158,9 @@ export default function Reports() {
             }
             if (targetLoc && targetLoc !== "-" && r.locationDoor !== targetLoc) {
               patch.locationDoor = targetLoc;
+            }
+            if (sched.title && r.scheduleTitle !== sched.title) {
+              patch.scheduleTitle = sched.title;
             }
 
             if (Object.keys(patch).length > 0) {
@@ -431,7 +442,10 @@ export default function Reports() {
                       selectMode ? toggleSelect(r.id) : navigate(reportResumeUrl(r))
                     }
                   >
-                    <p className="font-bold text-ink">{r.templateName}</p>
+                    <p className="font-bold text-ink">{r.scheduleTitle || r.templateName}</p>
+                    {r.scheduleTitle && r.scheduleTitle !== r.templateName && (
+                      <p className="text-xs font-medium text-navy-700">{r.templateName}</p>
+                    )}
                     <p className="truncate text-sm text-muted">
                       {r.locationDoor?.trim() || "-"} • {r.dateOfService || "-"} • {r.leadTechnician?.trim() || "Unassigned"}
                     </p>
