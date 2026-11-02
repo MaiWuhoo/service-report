@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, ChevronRight, CalendarDays, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarDays, Trash2, AlertTriangle } from "lucide-react";
 import {
   createScheduleEntry,
   updateScheduleEntry,
@@ -384,6 +384,17 @@ export default function ScheduleMaintenance() {
   }
 
   async function confirmSchedule() {
+    const filledLocs = templateSelections
+      .map((s) => (s.location || "").trim().toLowerCase())
+      .filter(Boolean);
+    const hasDups = new Set(filledLocs).size < filledLocs.length;
+    if (hasDups) {
+      const proceed = window.confirm(
+        "Notice: Two or more forms in this schedule have duplicate location names.\n\nDo you want to proceed with duplicate location names?"
+      );
+      if (!proceed) return;
+    }
+
     setConfirming(true);
     try {
       const primaryTemplate =
@@ -741,36 +752,62 @@ export default function ScheduleMaintenance() {
                         <div className="text-right">Actions</div>
                       </div>
                       <div className="space-y-0 divide-y divide-border px-3 py-2">
-                        {templateInstances.map((instance, idx) => (
-                          <div
-                            key={instance.id}
-                            className="grid gap-3 md:grid-cols-[1fr_auto] items-center py-3"
-                          >
-                            <div>
-                              <div className="text-xs font-semibold text-ink">Location / gate #{idx + 1}</div>
-                              <input
-                                value={instance.location}
-                                onChange={(e) =>
-                                  updateTemplateSelection(instance.id, {
-                                    location: e.target.value,
-                                  })
-                                }
-                                placeholder="e.g. Main Entrance - G01"
-                                className="mt-1 w-full rounded-md border border-border bg-white px-3 py-2 text-sm"
-                              />
-                            </div>
+                        {templateInstances.map((instance, idx) => {
+                          const curLoc = (instance.location || "").trim().toLowerCase();
+                          const isDup = Boolean(
+                            curLoc &&
+                            templateSelections.filter(
+                              (s) => (s.location || "").trim().toLowerCase() === curLoc
+                            ).length > 1
+                          );
 
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => removeTemplateInstance(instance.id)}
-                                className="rounded-md border border-danger-600 px-3 py-2 text-xs font-semibold text-danger-600 hover:bg-danger-100"
-                              >
-                                Remove
-                              </button>
+                          return (
+                            <div
+                              key={instance.id}
+                              className="grid gap-3 md:grid-cols-[1fr_auto] items-center py-3"
+                            >
+                              <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-ink">
+                                  <span>Location / gate #{idx + 1}</span>
+                                  {isDup && (
+                                    <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-600">
+                                      <AlertTriangle size={12} /> Duplicate Location
+                                    </span>
+                                  )}
+                                </div>
+                                <input
+                                  value={instance.location}
+                                  onChange={(e) =>
+                                    updateTemplateSelection(instance.id, {
+                                      location: e.target.value,
+                                    })
+                                  }
+                                  placeholder="e.g. Main Entrance - G01"
+                                  className={`mt-1 w-full rounded-md border px-3 py-2 text-sm transition-colors ${
+                                    isDup
+                                      ? "border-amber-400 bg-amber-50/50 text-amber-950 focus:border-amber-500"
+                                      : "border-border bg-white text-ink"
+                                  }`}
+                                />
+                                {isDup && (
+                                  <p className="mt-1 text-[11px] text-amber-700">
+                                    Notice: Another form in this schedule also uses this location name.
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => removeTemplateInstance(instance.id)}
+                                  className="rounded-md border border-danger-600 px-3 py-2 text-xs font-semibold text-danger-600 hover:bg-danger-100"
+                                >
+                                  Remove
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

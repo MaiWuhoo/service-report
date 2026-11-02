@@ -4,7 +4,7 @@ import { AlertTriangle, Camera, X, Upload } from "lucide-react";
 import YesNoToggle from "../components/YesNoToggle";
 import CameraCapture from "../components/CameraCapture";
 import ImagePreviewModal from "../components/ImagePreviewModal";
-import { getReport, updateReport, getScheduleEntry, updateScheduleEntry, subscribeToReport, updateReportSection } from "../lib/reportsApi";
+import { getScheduleEntry, updateScheduleEntry, subscribeToReport, updateReportSection, listRecentReports } from "../lib/reportsApi";
 import { compressImageToBlob } from "../lib/fileUtils";
 import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 import { recordReportMedia } from "../lib/reportMedia";
@@ -18,6 +18,9 @@ export default function ChecklistRunner() {
   const [items, setItems] = useState([]);
   const [remark, setRemark] = useState("");
   const [dateOfService, setDateOfService] = useState("");
+  const [locationDoor, setLocationDoor] = useState("");
+  const [scheduleEntry, setScheduleEntry] = useState(null);
+  const [siblingReports, setSiblingReports] = useState([]);
   const [saving, setSaving] = useState(false);
   const [activeCameraItemId, setActiveCameraItemId] = useState(null);
   const [currentLoadedStep, setCurrentLoadedStep] = useState(-1);
@@ -34,13 +37,46 @@ export default function ChecklistRunner() {
 
   useEffect(() => {
     if (!report) return;
+    if (currentLoadedStep === -1) {
+      setDateOfService(report.dateOfService ?? "");
+      setLocationDoor(report.locationDoor ?? "");
+    }
     if (currentLoadedStep !== stepIndex) {
       setItems(report.sections?.[stepIndex]?.items ?? []);
       setRemark(report.additionalRemark ?? "");
-      setDateOfService(report.dateOfService ?? "");
       setCurrentLoadedStep(stepIndex);
     }
   }, [report, stepIndex, currentLoadedStep]);
+
+  useEffect(() => {
+    if (!report) return;
+    if (!report.scheduleId) {
+      setScheduleEntry(null);
+      setSiblingReports([]);
+      return;
+    }
+    let isCancelled = false;
+
+    async function loadDuplicatesContext() {
+      try {
+        const entry = await getScheduleEntry(report.scheduleId);
+        if (!isCancelled && entry) {
+          setScheduleEntry(entry);
+        }
+        const recents = await listRecentReports(100);
+        if (!isCancelled && Array.isArray(recents)) {
+          setSiblingReports(recents.filter((r) => r.id !== id && r.scheduleId === report.scheduleId));
+        }
+      } catch (err) {
+        console.error("Failed to load schedule context for duplicates:", err);
+      }
+    }
+
+    loadDuplicatesContext();
+    return () => {
+      isCancelled = true;
+    };
+  }, [report?.scheduleId, id]);
 
   function updateItem(itemId, patch) {
     setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, ...patch } : it)));
@@ -108,41 +144,119 @@ export default function ChecklistRunner() {
   const isLastStep = stepIndex === totalSteps - 1;
   const currentSection = report?.sections?.[stepIndex];
 
+  // Determine current report's selection in scheduleEntry to avoid self-match
+  const mySelection = useMemo(() => {
+    if (!scheduleEntry?.templateSelections) return null;
+    return (
+      scheduleEntry.templateSelections.find(
+        (s) => s.reportId && (s.reportId === id || s.reportId === report?.reportId)
+      ) ||
+      scheduleEntry.templateSelections.find(
+        (s) =>
+          s.templateId === report?.templateId &&
+          (s.location || "").trim().toLowerCase() === (report?.locationDoor || "").trim().toLowerCase()
+      ) ||
+      null
+    );
+  }, [scheduleEntry, id, report]);
+
+  const duplicateWarning = useMemo(() => {
+    // Only check duplicates if this report belongs to a project / maintenance schedule
+    if (!report?.scheduleId) return null;
+
+    const curLoc = (locationDoor || "").trim().toLowerCase();
+    if (!curLoc || curLoc === "-") return null;
+
+    const projectName = scheduleEntry?.title ? `"${scheduleEntry.title}"` : "this maintenance schedule";
+
+    // 1. Check scheduleEntry.templateSelections within this project / maintenance schedule
+    if (scheduleEntry && Array.isArray(scheduleEntry.templateSelections)) {
+      const otherSelection = scheduleEntry.templateSelections.find((s) => {
+        if (mySelection && s.id === mySelection.id) return false;
+        if (s.reportId && (s.reportId === id || s.reportId === report?.reportId)) return false;
+        return (s.location || "").trim().toLowerCase() === curLoc;
+      });
+
+      if (otherSelection) {
+        return `Another checklist in ${projectName} already uses "${locationDoor.trim()}".`;
+      }
+    }
+
+    // 2. Check sibling reports with the same scheduleId in this project / maintenance schedule
+    if (siblingReports?.length) {
+      const dupReport = siblingReports.find(
+        (r) =>
+          r.id !== id &&
+          r.scheduleId === report.scheduleId &&
+          (r.locationDoor || "").trim().toLowerCase() === curLoc
+      );
+      if (dupReport) {
+        const title = dupReport.templateName || "Checklist";
+        return `Another report ("${title}") in ${projectName} already uses "${locationDoor.trim()}".`;
+      }
+    }
+
+    return null;
+  }, [locationDoor, scheduleEntry, mySelection, siblingReports, id, report?.scheduleId]);
+
   const hasUnsavedChanges = useMemo(() => {
     if (!report) return false;
     const dbItems = report.sections?.[stepIndex]?.items ?? [];
     if (JSON.stringify(items) !== JSON.stringify(dbItems)) return true;
     if (isLastStep && remark !== (report.additionalRemark ?? "")) return true;
     if (dateOfService !== (report.dateOfService ?? "")) return true;
+    if ((locationDoor ?? "").trim() !== (report.locationDoor ?? "").trim()) return true;
     return false;
-  }, [report, items, remark, dateOfService, stepIndex, isLastStep]);
+  }, [report, items, remark, dateOfService, locationDoor, stepIndex, isLastStep]);
 
   async function persist(nextStatus) {
     if (!id || !report) return null;
     setSaving(true);
     try {
+      const trimmedLoc = (locationDoor ?? "").trim();
       const payload = {
         status: nextStatus ?? report.status ?? "draft",
         dateOfService: dateOfService || report.dateOfService,
+        locationDoor: trimmedLoc !== "" ? trimmedLoc : (report.locationDoor ?? ""),
       };
       if (isLastStep) payload.additionalRemark = remark;
       
       const nextData = await updateReportSection(id, stepIndex, items, payload);
+      setReport((prev) => (prev ? { ...prev, ...payload } : prev));
 
-      // Propagate status into schedule entry templateSelections so UI shows instance status.
+      // Propagate status and location into schedule entry templateSelections
       try {
         const scheduleId = report?.scheduleId;
         if (scheduleId) {
           const entry = await getScheduleEntry(scheduleId);
-          if (entry && Array.isArray(entry.templateSelections)) {
-            const updated = entry.templateSelections.map((s) =>
-              s.reportId === id || s.reportId === report.reportId ? { ...s, status: payload.status } : s,
-            );
-            const allVerified = updated.every((s) => s.status === "verified");
-            await updateScheduleEntry(scheduleId, {
-              templateSelections: updated,
-              status: allVerified ? "verified" : updated.some((s) => s.status) ? "in_progress" : entry.status,
-            });
+          if (entry) {
+            let updatedSelections = null;
+            if (Array.isArray(entry.templateSelections)) {
+              updatedSelections = entry.templateSelections.map((s) => {
+                const isThisOne =
+                  (s.reportId && (s.reportId === id || s.reportId === report.reportId)) ||
+                  (mySelection && s.id === mySelection.id);
+                return isThisOne
+                  ? {
+                      ...s,
+                      status: payload.status,
+                      location: payload.locationDoor || s.location,
+                    }
+                  : s;
+              });
+            }
+            const allVerified = updatedSelections ? updatedSelections.every((s) => s.status === "verified") : false;
+            const schedulePatch = {
+              status: allVerified ? "verified" : (updatedSelections && updatedSelections.some((s) => s.status) ? "in_progress" : entry.status),
+            };
+            if (updatedSelections) {
+              schedulePatch.templateSelections = updatedSelections;
+            }
+            if (entry.reportId === id || entry.reportId === report.reportId) {
+              schedulePatch.location = payload.locationDoor || entry.location;
+            }
+            await updateScheduleEntry(scheduleId, schedulePatch);
+            setScheduleEntry((prev) => (prev ? { ...prev, ...schedulePatch } : prev));
           }
         }
       } catch (err) {
@@ -158,7 +272,23 @@ export default function ChecklistRunner() {
     }
   }
 
+  async function handleSaveClick() {
+    if (duplicateWarning) {
+      const confirmProceed = window.confirm(
+        `Duplicate Location Warning:\n\n${duplicateWarning}\n\nDo you want to save with this duplicate location name?`
+      );
+      if (!confirmProceed) return;
+    }
+    await persist(report.status);
+  }
+
   async function handleNext() {
+    if (duplicateWarning) {
+      const confirmProceed = window.confirm(
+        `Duplicate Location Warning:\n\n${duplicateWarning}\n\nDo you want to proceed with this duplicate location name?`
+      );
+      if (!confirmProceed) return;
+    }
     if (hasUnsavedChanges) {
       const saved = await persist("in_review");
       if (!saved) return;
@@ -229,14 +359,45 @@ export default function ChecklistRunner() {
               type="date"
               value={dateOfService}
               onChange={(e) => setDateOfService(e.target.value)}
-              className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-border bg-white px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <p className="text-xs text-muted">Location Door</p>
-            <p className="font-semibold">{report.locationDoor ?? "-"}</p>
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-muted" htmlFor="location-door">
+                Location Door
+              </label>
+              <span className="text-[10px] font-bold text-navy-700 uppercase tracking-wider">
+                Edit
+              </span>
+            </div>
+            <input
+              id="location-door"
+              type="text"
+              value={locationDoor}
+              onChange={(e) => setLocationDoor(e.target.value)}
+              placeholder="e.g. Break bulk in"
+              className={`mt-1 w-full rounded-md border px-3 py-2 text-sm font-semibold transition-colors ${
+                duplicateWarning
+                  ? "border-amber-400 bg-amber-50 text-amber-950 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  : "border-border bg-white text-ink focus:border-navy-700 focus:outline-none"
+              }`}
+            />
           </div>
         </div>
+
+        {duplicateWarning && (
+          <div className="mt-2.5 flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm animate-fadeIn">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+            <div className="flex-1 space-y-0.5">
+              <p className="font-bold text-amber-900">Duplicate Location Name</p>
+              <p className="text-amber-800">{duplicateWarning}</p>
+              <p className="text-[11px] text-amber-700 mt-0.5">
+                Tip: Each gate or checkpoint should ideally have a unique name so reports do not conflict.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       <div className="flex items-center justify-between rounded-lg bg-navy-800 px-4 py-3 text-white">
@@ -328,7 +489,7 @@ export default function ChecklistRunner() {
       )}
 
       <button
-        onClick={() => persist(report.status)}
+        onClick={handleSaveClick}
         disabled={saving || !hasUnsavedChanges}
         className="w-full rounded-md bg-navy-800 py-3 text-sm font-bold uppercase tracking-wide text-white hover:bg-navy-700 disabled:opacity-60"
       >
