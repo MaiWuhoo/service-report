@@ -20,6 +20,7 @@ import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import ReportMedia from "./pages/ReportMedia";
 import Media from "./pages/Media";
+import DebugSizes from "./pages/DebugSize";
 
 export default function App() {
   return (
@@ -42,7 +43,10 @@ export default function App() {
           <Route path="/schedule/:id/open" element={<ScheduleForms />} />
           <Route path="/calendar" element={<FullCalendar />} />
           <Route path="/checklist-templates/new" element={<AddChecklist />} />
-          <Route path="/checklist-templates/import" element={<ImportChecklistFromPdf />} />
+          <Route
+            path="/checklist-templates/import"
+            element={<ImportChecklistFromPdf />}
+          />
           <Route
             path="/checklist-templates/:id/edit"
             element={<AddChecklist />}
@@ -55,6 +59,7 @@ export default function App() {
           <Route path="/report-media/:id" element={<ReportMedia />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/debug-sizes" element={<DebugSizes />} />
         </Route>
       </Routes>
     </AuthGate>
