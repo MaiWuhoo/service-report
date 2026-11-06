@@ -46,6 +46,13 @@ export async function listRecentReports(count = 10) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+/** Only the reports linked to one schedule entry (avoids downloading every report). */
+export async function listReportsBySchedule(scheduleId) {
+  const q = query(reportsCol, where("scheduleId", "==", scheduleId));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
 export async function getReport(id) {
   const snap = await getDoc(doc(db, "serviceReports", id));
   if (!snap.exists()) return null;
@@ -69,25 +76,30 @@ export async function updateReport(id, data) {
   });
 }
 
-export async function updateReportSection(id, stepIndex, items, extraPayload = {}) {
+export async function updateReportSection(
+  id,
+  stepIndex,
+  items,
+  extraPayload = {},
+) {
   const reportRef = doc(db, "serviceReports", id);
   return await runTransaction(db, async (tx) => {
     const snap = await tx.get(reportRef);
     if (!snap.exists()) throw new Error("Report not found");
     const data = snap.data();
-    
+
     // Safely update only the specific section by index
-    const nextSections = data.sections.map((s, idx) => 
-      idx === stepIndex ? { ...s, items } : s
+    const nextSections = data.sections.map((s, idx) =>
+      idx === stepIndex ? { ...s, items } : s,
     );
-    
+
     const nextData = {
       ...data,
       ...extraPayload,
       sections: nextSections,
       updatedAt: serverTimestamp(),
     };
-    
+
     tx.update(reportRef, {
       ...extraPayload,
       sections: nextSections,
@@ -212,15 +224,20 @@ export async function syncReportsFromSchedule(scheduleEntry) {
       (Array.isArray(scheduleEntry.templateSelections)
         ? scheduleEntry.templateSelections.find(
             (s) =>
-              (s.reportId && (s.reportId === rId || s.reportId === report.reportId)) ||
-              (s.location && report.locationDoor && s.location.trim().toLowerCase() === report.locationDoor.trim().toLowerCase())
+              (s.reportId &&
+                (s.reportId === rId || s.reportId === report.reportId)) ||
+              (s.location &&
+                report.locationDoor &&
+                s.location.trim().toLowerCase() ===
+                  report.locationDoor.trim().toLowerCase()),
           )
         : null);
 
     const targetTechnician = (scheduleEntry.assignedTechnician ?? "").trim();
     const targetLocation = (
       sel?.location?.trim() ||
-      (!scheduleEntry.templateSelections || scheduleEntry.templateSelections.length <= 1
+      (!scheduleEntry.templateSelections ||
+      scheduleEntry.templateSelections.length <= 1
         ? scheduleEntry.location?.trim()
         : "") ||
       ""
@@ -249,10 +266,7 @@ export async function syncReportsFromSchedule(scheduleEntry) {
       patch.scheduleTitle = scheduleEntry.title;
     }
 
-    if (
-      targetDate &&
-      (!report.dateOfService || report.dateOfService === "-")
-    ) {
+    if (targetDate && (!report.dateOfService || report.dateOfService === "-")) {
       patch.dateOfService = targetDate;
     }
 
@@ -274,7 +288,7 @@ export async function syncReportsFromSchedule(scheduleEntry) {
           .then(() => {
             updatedReports.push({ id: rId, ...patch });
           })
-          .catch((err) => console.error(`Failed to sync report ${rId}:`, err))
+          .catch((err) => console.error(`Failed to sync report ${rId}:`, err)),
       );
     }
   }
@@ -329,7 +343,11 @@ export async function getEngineerSignatures() {
 }
 
 export async function saveEngineerSignatures(signatures) {
-  await setDoc(doc(db, "settings", "engineerSignatures"), { signatures }, { merge: true });
+  await setDoc(
+    doc(db, "settings", "engineerSignatures"),
+    { signatures },
+    { merge: true },
+  );
 }
 
 export async function getManagerSignatures() {
@@ -339,7 +357,11 @@ export async function getManagerSignatures() {
 }
 
 export async function saveManagerSignatures(signatures) {
-  await setDoc(doc(db, "settings", "managerSignatures"), { signatures }, { merge: true });
+  await setDoc(
+    doc(db, "settings", "managerSignatures"),
+    { signatures },
+    { merge: true },
+  );
 }
 
 export async function autoSaveManagerSignature(name, signature, date) {
@@ -348,12 +370,14 @@ export async function autoSaveManagerSignature(name, signature, date) {
     const existing = await getManagerSignatures();
     const cleanName = name.trim();
     const idx = existing.findIndex(
-      (s) => s.name.toLowerCase() === cleanName.toLowerCase()
+      (s) => s.name.toLowerCase() === cleanName.toLowerCase(),
     );
     let updated;
     if (idx >= 0) {
       updated = existing.map((s, i) =>
-        i === idx ? { ...s, name: cleanName, signature, date: date || s.date } : s
+        i === idx
+          ? { ...s, name: cleanName, signature, date: date || s.date }
+          : s,
       );
     } else {
       updated = [
@@ -379,12 +403,14 @@ export async function autoSaveEngineerSignature(name, signature, date) {
     const existing = await getEngineerSignatures();
     const cleanName = name.trim();
     const idx = existing.findIndex(
-      (s) => s.name.toLowerCase() === cleanName.toLowerCase()
+      (s) => s.name.toLowerCase() === cleanName.toLowerCase(),
     );
     let updated;
     if (idx >= 0) {
       updated = existing.map((s, i) =>
-        i === idx ? { ...s, name: cleanName, signature, date: date || s.date } : s
+        i === idx
+          ? { ...s, name: cleanName, signature, date: date || s.date }
+          : s,
       );
     } else {
       updated = [
@@ -445,7 +471,8 @@ const shareLinksCol = collection(db, "shareLinks");
 
 /** Generate a cryptographically random 8-char alphanumeric token. */
 function generateToken(len = 8) {
-  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const chars =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   const arr = new Uint8Array(len);
   crypto.getRandomValues(arr);
   return Array.from(arr, (b) => chars[b % chars.length]).join("");

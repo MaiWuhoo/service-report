@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
-import { getScheduleEntry, listChecklistTemplates, getChecklistTemplate, updateScheduleEntry, getReport, listRecentReports, syncReportsFromSchedule } from "../lib/reportsApi";
+import { getScheduleEntry, listChecklistTemplates, getChecklistTemplate, updateScheduleEntry, getReport, listReportsBySchedule, syncReportsFromSchedule } from "../lib/reportsApi";
 import StatusBadge from "../components/StatusBadge";
 import { createReportFromTemplate } from "../lib/createReportFromTemplate";
 import { DEFAULT_TEMPLATE } from "../lib/defaultTemplates";
@@ -46,7 +46,7 @@ export default function ScheduleForms() {
 
         let allRecentReports = [];
         try {
-          allRecentReports = await listRecentReports(200);
+          allRecentReports = await listReportsBySchedule(e.id);
         } catch {}
 
         const claimedReportIds = new Set();
@@ -158,9 +158,13 @@ export default function ScheduleForms() {
         }
 
         // Keep reports synchronized with the schedule's technician and location
-        await syncReportsFromSchedule({ ...e, templateSelections: enhanced });
-
         setEntry({ ...e, status: computedScheduleStatus, templateSelections: enhanced });
+        setLoading(false);
+
+        // Runs in the background so the page does not wait for it.
+        syncReportsFromSchedule({ ...e, templateSelections: enhanced }).catch((err) =>
+          console.error("Background sync failed:", err),
+        );
       } catch (err) {
         console.error(err);
       } finally {
