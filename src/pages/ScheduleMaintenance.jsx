@@ -168,7 +168,7 @@ export default function ScheduleMaintenance() {
           );
           setCustomerId(entry.customerId ?? "");
           setCompanyStamp(entry.companyStamp ?? null);
-          setIncludeCompanyStamp(Boolean(entry.companyStamp));
+          setIncludeCompanyStamp(Boolean(entry.companyStamp || entry.useCompanyStamp));
           const start = parseDateStr(entry.startDate) ?? today;
           const end = parseDateStr(entry.endDate);
           setRangeStart(start);

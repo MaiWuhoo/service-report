@@ -22,6 +22,7 @@ import {
   updateReport,
   getScheduleEntry,
   updateScheduleEntry,
+  getSlimPatch,
   createShareLink,
   copyToClipboard,
 } from "../lib/reportsApi";
@@ -115,11 +116,24 @@ export default function Portal() {
         setSchedule(upcoming);
         setTemplates([DEFAULT_TEMPLATE, ...customTemplates]);
         setCustomers(customerList);
+        setLoading(false); // show the page now; auto-sync below runs in background
+
+        // One-time self-heal: shrink old schedule docs that carry base64 images
+        upcoming.forEach((entry) => {
+          const slim = getSlimPatch(entry);
+          if (slim) {
+            updateScheduleEntry(entry.id, slim).catch((e) =>
+              console.error("Slim schedule failed:", e),
+            );
+          }
+        });
 
         // Auto-sync reports whose schedule has updated technician or location
         const reportsWithSchedule = reports.filter((r) => r.scheduleId);
         if (reportsWithSchedule.length > 0) {
-          const scheduleIds = [...new Set(reportsWithSchedule.map((r) => r.scheduleId))];
+          const scheduleIds = [
+            ...new Set(reportsWithSchedule.map((r) => r.scheduleId)),
+          ];
           const scheduleEntries = await Promise.all(
             scheduleIds.map(async (sId) => {
               const fromUpcoming = upcoming.find((s) => s.id === sId);
@@ -129,7 +143,7 @@ export default function Portal() {
               } catch {
                 return null;
               }
-            })
+            }),
           );
           const schedMap = new Map();
           scheduleEntries.filter(Boolean).forEach((s) => schedMap.set(s.id, s));
@@ -143,24 +157,40 @@ export default function Portal() {
               if (!sched) return r;
 
               const sel = Array.isArray(sched.templateSelections)
-                ? sched.templateSelections.find((s) => 
-                    (s.reportId && (s.reportId === r.id || s.reportId === r.reportId)) ||
-                    (s.location && r.locationDoor && s.location.trim().toLowerCase() === r.locationDoor.trim().toLowerCase())
+                ? sched.templateSelections.find(
+                    (s) =>
+                      (s.reportId &&
+                        (s.reportId === r.id || s.reportId === r.reportId)) ||
+                      (s.location &&
+                        r.locationDoor &&
+                        s.location.trim().toLowerCase() ===
+                          r.locationDoor.trim().toLowerCase()),
                   )
                 : null;
 
               const targetTech = (sched.assignedTechnician ?? "").trim();
               const targetLoc = (
                 sel?.location?.trim() ||
-                (!sched.templateSelections || sched.templateSelections.length <= 1 ? sched.location?.trim() : "") ||
+                (!sched.templateSelections ||
+                sched.templateSelections.length <= 1
+                  ? sched.location?.trim()
+                  : "") ||
                 ""
               ).trim();
 
               const patch = {};
-              if (targetTech && targetTech !== "Unassigned" && r.leadTechnician !== targetTech) {
+              if (
+                targetTech &&
+                targetTech !== "Unassigned" &&
+                r.leadTechnician !== targetTech
+              ) {
                 patch.leadTechnician = targetTech;
               }
-              if (targetLoc && targetLoc !== "-" && r.locationDoor !== targetLoc) {
+              if (
+                targetLoc &&
+                targetLoc !== "-" &&
+                r.locationDoor !== targetLoc
+              ) {
                 patch.locationDoor = targetLoc;
               }
               if (sched.title && r.scheduleTitle !== sched.title) {
@@ -177,7 +207,7 @@ export default function Portal() {
                 }
               }
               return r;
-            })
+            }),
           );
 
           if (hadUpdates) {
@@ -444,10 +474,15 @@ export default function Portal() {
                 >
                   <td className="px-5 py-3.5 font-medium">
                     <div className="font-semibold text-ink">
-                      {r.scheduleTitle || scheduleMap.get(r.scheduleId)?.title || r.templateName}
+                      {r.scheduleTitle ||
+                        scheduleMap.get(r.scheduleId)?.title ||
+                        r.templateName}
                     </div>
-                    {(r.scheduleTitle || scheduleMap.get(r.scheduleId)?.title) &&
-                      (r.scheduleTitle || scheduleMap.get(r.scheduleId)?.title) !== r.templateName && (
+                    {(r.scheduleTitle ||
+                      scheduleMap.get(r.scheduleId)?.title) &&
+                      (r.scheduleTitle ||
+                        scheduleMap.get(r.scheduleId)?.title) !==
+                        r.templateName && (
                         <div className="text-xs font-normal text-muted">
                           {r.templateName}
                         </div>
@@ -535,34 +570,57 @@ export default function Portal() {
                 )}
                 {(() => {
                   let names = "";
-                  if (Array.isArray(s.templateNames) && s.templateNames.length > 0) {
+                  if (
+                    Array.isArray(s.templateNames) &&
+                    s.templateNames.length > 0
+                  ) {
                     names = s.templateNames.join(", ");
-                  } else if (Array.isArray(s.templateSelections) && s.templateSelections.length > 0) {
-                    const tIds = [...new Set(s.templateSelections.map((sel) => sel.templateId).filter(Boolean))];
-                    const foundNames = tIds.map((tId) => templates.find((t) => t.id === tId)?.name || tId);
+                  } else if (
+                    Array.isArray(s.templateSelections) &&
+                    s.templateSelections.length > 0
+                  ) {
+                    const tIds = [
+                      ...new Set(
+                        s.templateSelections
+                          .map((sel) => sel.templateId)
+                          .filter(Boolean),
+                      ),
+                    ];
+                    const foundNames = tIds.map(
+                      (tId) => templates.find((t) => t.id === tId)?.name || tId,
+                    );
                     if (foundNames.length > 0) names = foundNames.join(", ");
                   }
                   if (!names) names = s.templateName;
                   return names ? (
-                    <p className="text-xs text-muted">
-                      Checklist: {names}
-                    </p>
+                    <p className="text-xs text-muted">Checklist: {names}</p>
                   ) : null;
                 })()}
               </div>
-              <StatusBadge status={(() => {
-                if (s.templateSelections && s.templateSelections.length > 0) {
-                  const statuses = s.templateSelections.map((sel) => sel.status ?? "upcoming");
-                  if (statuses.length > 0 && statuses.every((st) => st === "verified")) {
-                    return "verified";
+              <StatusBadge
+                status={(() => {
+                  if (s.templateSelections && s.templateSelections.length > 0) {
+                    const statuses = s.templateSelections.map(
+                      (sel) => sel.status ?? "upcoming",
+                    );
+                    if (
+                      statuses.length > 0 &&
+                      statuses.every((st) => st === "verified")
+                    ) {
+                      return "verified";
+                    }
+                    if (
+                      statuses.some(
+                        (st) => st === "verified" || st === "in_progress",
+                      )
+                    ) {
+                      return "in_progress";
+                    }
+                    return "upcoming";
                   }
-                  if (statuses.some((st) => st === "verified" || st === "in_progress")) {
-                    return "in_progress";
-                  }
-                  return "upcoming";
-                }
-                return s.status ?? "upcoming";
-              })()} />
+                  return s.status ?? "upcoming";
+                })()}
+              />
               <button
                 onClick={(e) => {
                   e.stopPropagation();
