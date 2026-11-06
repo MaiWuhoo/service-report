@@ -20,7 +20,7 @@ import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import ReportMedia from "./pages/ReportMedia";
 import Media from "./pages/Media";
-import DebugSizes from "./pages/DebugSize";
+import DebugSizes from "./pages/DebugSizes";
 
 export default function App() {
   return (
