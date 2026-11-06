@@ -76,30 +76,25 @@ export async function updateReport(id, data) {
   });
 }
 
-export async function updateReportSection(
-  id,
-  stepIndex,
-  items,
-  extraPayload = {},
-) {
+export async function updateReportSection(id, stepIndex, items, extraPayload = {}) {
   const reportRef = doc(db, "serviceReports", id);
   return await runTransaction(db, async (tx) => {
     const snap = await tx.get(reportRef);
     if (!snap.exists()) throw new Error("Report not found");
     const data = snap.data();
-
+    
     // Safely update only the specific section by index
-    const nextSections = data.sections.map((s, idx) =>
-      idx === stepIndex ? { ...s, items } : s,
+    const nextSections = data.sections.map((s, idx) => 
+      idx === stepIndex ? { ...s, items } : s
     );
-
+    
     const nextData = {
       ...data,
       ...extraPayload,
       sections: nextSections,
       updatedAt: serverTimestamp(),
     };
-
+    
     tx.update(reportRef, {
       ...extraPayload,
       sections: nextSections,
@@ -149,8 +144,55 @@ export async function getScheduleEntry(id) {
   return { id: snap.id, ...snap.data() };
 }
 
+// Fields that must never live inside a schedule document: they are base64
+// images that already exist on the report, and they make every schedule read
+// (Portal, Select Form, Calendar) download megabytes.
+const HEAVY_SELECTION_FIELDS = ["engineerSignature", "managerSignature"];
+
+function slimSelections(selections) {
+  if (!Array.isArray(selections)) return selections;
+  return selections.map((sel) => {
+    const out = { ...sel };
+    for (const f of HEAVY_SELECTION_FIELDS) {
+      if (typeof out[f] === "string" && out[f].length > 0) out[f] = true;
+    }
+    return out;
+  });
+}
+
+export function sanitizeScheduleData(data) {
+  const out = { ...data };
+  if (out.templateSelections) {
+    out.templateSelections = slimSelections(out.templateSelections);
+  }
+  if (typeof out.companyStamp === "string" && out.companyStamp.length > 0) {
+    out.useCompanyStamp = true;
+    out.companyStamp = null;
+  } else if ("companyStamp" in out && !out.companyStamp && out.useCompanyStamp === undefined) {
+    out.useCompanyStamp = false;
+  }
+  return out;
+}
+
+/** Returns a patch that shrinks an existing bloated schedule doc, or null. */
+export function getSlimPatch(entry) {
+  const patch = {};
+  const slimSel = slimSelections(entry.templateSelections);
+  if (
+    Array.isArray(entry.templateSelections) &&
+    JSON.stringify(slimSel) !== JSON.stringify(entry.templateSelections)
+  ) {
+    patch.templateSelections = slimSel;
+  }
+  if (typeof entry.companyStamp === "string" && entry.companyStamp.length > 0) {
+    patch.useCompanyStamp = true;
+    patch.companyStamp = null;
+  }
+  return Object.keys(patch).length ? patch : null;
+}
+
 export async function updateScheduleEntry(id, data) {
-  await updateDoc(doc(db, "maintenanceSchedule", id), data);
+  await updateDoc(doc(db, "maintenanceSchedule", id), sanitizeScheduleData(data));
 }
 
 export async function deleteScheduleEntry(id) {
@@ -159,7 +201,7 @@ export async function deleteScheduleEntry(id) {
 
 export async function createScheduleEntry(data) {
   const ref = await addDoc(scheduleCol, {
-    ...data,
+    ...sanitizeScheduleData(data),
     createdAt: serverTimestamp(),
   });
   return ref.id;
@@ -216,6 +258,7 @@ export async function syncReportsFromSchedule(scheduleEntry) {
 
   const updatedReports = [];
   const promises = [];
+  let profileStamp; // lazily loaded, only if a report needs the stamp
 
   for (const [rId, report] of allReportsMap) {
     const sel =
@@ -224,20 +267,15 @@ export async function syncReportsFromSchedule(scheduleEntry) {
       (Array.isArray(scheduleEntry.templateSelections)
         ? scheduleEntry.templateSelections.find(
             (s) =>
-              (s.reportId &&
-                (s.reportId === rId || s.reportId === report.reportId)) ||
-              (s.location &&
-                report.locationDoor &&
-                s.location.trim().toLowerCase() ===
-                  report.locationDoor.trim().toLowerCase()),
+              (s.reportId && (s.reportId === rId || s.reportId === report.reportId)) ||
+              (s.location && report.locationDoor && s.location.trim().toLowerCase() === report.locationDoor.trim().toLowerCase())
           )
         : null);
 
     const targetTechnician = (scheduleEntry.assignedTechnician ?? "").trim();
     const targetLocation = (
       sel?.location?.trim() ||
-      (!scheduleEntry.templateSelections ||
-      scheduleEntry.templateSelections.length <= 1
+      (!scheduleEntry.templateSelections || scheduleEntry.templateSelections.length <= 1
         ? scheduleEntry.location?.trim()
         : "") ||
       ""
@@ -266,7 +304,10 @@ export async function syncReportsFromSchedule(scheduleEntry) {
       patch.scheduleTitle = scheduleEntry.title;
     }
 
-    if (targetDate && (!report.dateOfService || report.dateOfService === "-")) {
+    if (
+      targetDate &&
+      (!report.dateOfService || report.dateOfService === "-")
+    ) {
       patch.dateOfService = targetDate;
     }
 
@@ -278,8 +319,19 @@ export async function syncReportsFromSchedule(scheduleEntry) {
       patch.customerId = scheduleEntry.customerId;
     }
 
-    if (scheduleEntry.companyStamp && !report.companyStamp) {
-      patch.companyStamp = scheduleEntry.companyStamp;
+    if (!report.companyStamp) {
+      if (scheduleEntry.companyStamp) {
+        patch.companyStamp = scheduleEntry.companyStamp;
+      } else if (scheduleEntry.useCompanyStamp) {
+        if (profileStamp === undefined) {
+          try {
+            profileStamp = (await getCompanyProfile())?.companyStamp ?? null;
+          } catch {
+            profileStamp = null;
+          }
+        }
+        if (profileStamp) patch.companyStamp = profileStamp;
+      }
     }
 
     if (Object.keys(patch).length > 0) {
@@ -288,7 +340,7 @@ export async function syncReportsFromSchedule(scheduleEntry) {
           .then(() => {
             updatedReports.push({ id: rId, ...patch });
           })
-          .catch((err) => console.error(`Failed to sync report ${rId}:`, err)),
+          .catch((err) => console.error(`Failed to sync report ${rId}:`, err))
       );
     }
   }
@@ -343,11 +395,7 @@ export async function getEngineerSignatures() {
 }
 
 export async function saveEngineerSignatures(signatures) {
-  await setDoc(
-    doc(db, "settings", "engineerSignatures"),
-    { signatures },
-    { merge: true },
-  );
+  await setDoc(doc(db, "settings", "engineerSignatures"), { signatures }, { merge: true });
 }
 
 export async function getManagerSignatures() {
@@ -357,11 +405,7 @@ export async function getManagerSignatures() {
 }
 
 export async function saveManagerSignatures(signatures) {
-  await setDoc(
-    doc(db, "settings", "managerSignatures"),
-    { signatures },
-    { merge: true },
-  );
+  await setDoc(doc(db, "settings", "managerSignatures"), { signatures }, { merge: true });
 }
 
 export async function autoSaveManagerSignature(name, signature, date) {
@@ -370,14 +414,12 @@ export async function autoSaveManagerSignature(name, signature, date) {
     const existing = await getManagerSignatures();
     const cleanName = name.trim();
     const idx = existing.findIndex(
-      (s) => s.name.toLowerCase() === cleanName.toLowerCase(),
+      (s) => s.name.toLowerCase() === cleanName.toLowerCase()
     );
     let updated;
     if (idx >= 0) {
       updated = existing.map((s, i) =>
-        i === idx
-          ? { ...s, name: cleanName, signature, date: date || s.date }
-          : s,
+        i === idx ? { ...s, name: cleanName, signature, date: date || s.date } : s
       );
     } else {
       updated = [
@@ -403,14 +445,12 @@ export async function autoSaveEngineerSignature(name, signature, date) {
     const existing = await getEngineerSignatures();
     const cleanName = name.trim();
     const idx = existing.findIndex(
-      (s) => s.name.toLowerCase() === cleanName.toLowerCase(),
+      (s) => s.name.toLowerCase() === cleanName.toLowerCase()
     );
     let updated;
     if (idx >= 0) {
       updated = existing.map((s, i) =>
-        i === idx
-          ? { ...s, name: cleanName, signature, date: date || s.date }
-          : s,
+        i === idx ? { ...s, name: cleanName, signature, date: date || s.date } : s
       );
     } else {
       updated = [
@@ -471,8 +511,7 @@ const shareLinksCol = collection(db, "shareLinks");
 
 /** Generate a cryptographically random 8-char alphanumeric token. */
 function generateToken(len = 8) {
-  const chars =
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   const arr = new Uint8Array(len);
   crypto.getRandomValues(arr);
   return Array.from(arr, (b) => chars[b % chars.length]).join("");
