@@ -4,18 +4,15 @@ import { AlertTriangle, Camera, X, Upload } from "lucide-react";
 import YesNoToggle from "../components/YesNoToggle";
 import CameraCapture from "../components/CameraCapture";
 import ImagePreviewModal from "../components/ImagePreviewModal";
-<<<<<<< HEAD
-import { getScheduleEntry, updateScheduleEntry, subscribeToReport, updateReportSection, listRecentReports } from "../lib/reportsApi";
-=======
+
 import {
-  getReport,
-  updateReport,
   getScheduleEntry,
   updateScheduleEntry,
   subscribeToReport,
   updateReportSection,
+  listReportsBySchedule,
 } from "../lib/reportsApi";
->>>>>>> 1de2fe44c15281ce76055349a8d8e4b01ce06ebd
+
 import { compressImageToBlob } from "../lib/fileUtils";
 import { uploadImageToCloudinary } from "../lib/cloudinaryUtils";
 import { recordReportMedia } from "../lib/reportMedia";
@@ -74,9 +71,9 @@ export default function ChecklistRunner() {
         if (!isCancelled && entry) {
           setScheduleEntry(entry);
         }
-        const recents = await listRecentReports(100);
-        if (!isCancelled && Array.isArray(recents)) {
-          setSiblingReports(recents.filter((r) => r.id !== id && r.scheduleId === report.scheduleId));
+        const linked = await listReportsBySchedule(report.scheduleId);
+        if (!isCancelled && Array.isArray(linked)) {
+          setSiblingReports(linked.filter((r) => r.id !== id));
         }
       } catch (err) {
         console.error("Failed to load schedule context for duplicates:", err);
@@ -165,12 +162,14 @@ export default function ChecklistRunner() {
     if (!scheduleEntry?.templateSelections) return null;
     return (
       scheduleEntry.templateSelections.find(
-        (s) => s.reportId && (s.reportId === id || s.reportId === report?.reportId)
+        (s) =>
+          s.reportId && (s.reportId === id || s.reportId === report?.reportId),
       ) ||
       scheduleEntry.templateSelections.find(
         (s) =>
           s.templateId === report?.templateId &&
-          (s.location || "").trim().toLowerCase() === (report?.locationDoor || "").trim().toLowerCase()
+          (s.location || "").trim().toLowerCase() ===
+            (report?.locationDoor || "").trim().toLowerCase(),
       ) ||
       null
     );
@@ -183,13 +182,19 @@ export default function ChecklistRunner() {
     const curLoc = (locationDoor || "").trim().toLowerCase();
     if (!curLoc || curLoc === "-") return null;
 
-    const projectName = scheduleEntry?.title ? `"${scheduleEntry.title}"` : "this maintenance schedule";
+    const projectName = scheduleEntry?.title
+      ? `"${scheduleEntry.title}"`
+      : "this maintenance schedule";
 
     // 1. Check scheduleEntry.templateSelections within this project / maintenance schedule
     if (scheduleEntry && Array.isArray(scheduleEntry.templateSelections)) {
       const otherSelection = scheduleEntry.templateSelections.find((s) => {
         if (mySelection && s.id === mySelection.id) return false;
-        if (s.reportId && (s.reportId === id || s.reportId === report?.reportId)) return false;
+        if (
+          s.reportId &&
+          (s.reportId === id || s.reportId === report?.reportId)
+        )
+          return false;
         return (s.location || "").trim().toLowerCase() === curLoc;
       });
 
@@ -204,7 +209,7 @@ export default function ChecklistRunner() {
         (r) =>
           r.id !== id &&
           r.scheduleId === report.scheduleId &&
-          (r.locationDoor || "").trim().toLowerCase() === curLoc
+          (r.locationDoor || "").trim().toLowerCase() === curLoc,
       );
       if (dupReport) {
         const title = dupReport.templateName || "Checklist";
@@ -213,7 +218,14 @@ export default function ChecklistRunner() {
     }
 
     return null;
-  }, [locationDoor, scheduleEntry, mySelection, siblingReports, id, report?.scheduleId]);
+  }, [
+    locationDoor,
+    scheduleEntry,
+    mySelection,
+    siblingReports,
+    id,
+    report?.scheduleId,
+  ]);
 
   const hasUnsavedChanges = useMemo(() => {
     if (!report) return false;
@@ -221,9 +233,18 @@ export default function ChecklistRunner() {
     if (JSON.stringify(items) !== JSON.stringify(dbItems)) return true;
     if (isLastStep && remark !== (report.additionalRemark ?? "")) return true;
     if (dateOfService !== (report.dateOfService ?? "")) return true;
-    if ((locationDoor ?? "").trim() !== (report.locationDoor ?? "").trim()) return true;
+    if ((locationDoor ?? "").trim() !== (report.locationDoor ?? "").trim())
+      return true;
     return false;
-  }, [report, items, remark, dateOfService, locationDoor, stepIndex, isLastStep]);
+  }, [
+    report,
+    items,
+    remark,
+    dateOfService,
+    locationDoor,
+    stepIndex,
+    isLastStep,
+  ]);
 
   async function persist(nextStatus) {
     if (!id || !report) return null;
@@ -233,7 +254,8 @@ export default function ChecklistRunner() {
       const payload = {
         status: nextStatus ?? report.status ?? "draft",
         dateOfService: dateOfService || report.dateOfService,
-        locationDoor: trimmedLoc !== "" ? trimmedLoc : (report.locationDoor ?? ""),
+        locationDoor:
+          trimmedLoc !== "" ? trimmedLoc : (report.locationDoor ?? ""),
       };
       if (isLastStep) payload.additionalRemark = remark;
 
@@ -245,13 +267,14 @@ export default function ChecklistRunner() {
         const scheduleId = report?.scheduleId;
         if (scheduleId) {
           const entry = await getScheduleEntry(scheduleId);
-<<<<<<< HEAD
+
           if (entry) {
             let updatedSelections = null;
             if (Array.isArray(entry.templateSelections)) {
               updatedSelections = entry.templateSelections.map((s) => {
                 const isThisOne =
-                  (s.reportId && (s.reportId === id || s.reportId === report.reportId)) ||
+                  (s.reportId &&
+                    (s.reportId === id || s.reportId === report.reportId)) ||
                   (mySelection && s.id === mySelection.id);
                 return isThisOne
                   ? {
@@ -262,9 +285,15 @@ export default function ChecklistRunner() {
                   : s;
               });
             }
-            const allVerified = updatedSelections ? updatedSelections.every((s) => s.status === "verified") : false;
+            const allVerified = updatedSelections
+              ? updatedSelections.every((s) => s.status === "verified")
+              : false;
             const schedulePatch = {
-              status: allVerified ? "verified" : (updatedSelections && updatedSelections.some((s) => s.status) ? "in_progress" : entry.status),
+              status: allVerified
+                ? "verified"
+                : updatedSelections && updatedSelections.some((s) => s.status)
+                  ? "in_progress"
+                  : entry.status,
             };
             if (updatedSelections) {
               schedulePatch.templateSelections = updatedSelections;
@@ -273,24 +302,9 @@ export default function ChecklistRunner() {
               schedulePatch.location = payload.locationDoor || entry.location;
             }
             await updateScheduleEntry(scheduleId, schedulePatch);
-            setScheduleEntry((prev) => (prev ? { ...prev, ...schedulePatch } : prev));
-=======
-          if (entry && Array.isArray(entry.templateSelections)) {
-            const updated = entry.templateSelections.map((s) =>
-              s.reportId === id || s.reportId === report.reportId
-                ? { ...s, status: payload.status }
-                : s,
+            setScheduleEntry((prev) =>
+              prev ? { ...prev, ...schedulePatch } : prev,
             );
-            const allVerified = updated.every((s) => s.status === "verified");
-            await updateScheduleEntry(scheduleId, {
-              templateSelections: updated,
-              status: allVerified
-                ? "verified"
-                : updated.some((s) => s.status)
-                  ? "in_progress"
-                  : entry.status,
-            });
->>>>>>> 1de2fe44c15281ce76055349a8d8e4b01ce06ebd
           }
         }
       } catch (err) {
@@ -309,7 +323,7 @@ export default function ChecklistRunner() {
   async function handleSaveClick() {
     if (duplicateWarning) {
       const confirmProceed = window.confirm(
-        `Duplicate Location Warning:\n\n${duplicateWarning}\n\nDo you want to save with this duplicate location name?`
+        `Duplicate Location Warning:\n\n${duplicateWarning}\n\nDo you want to save with this duplicate location name?`,
       );
       if (!confirmProceed) return;
     }
@@ -319,7 +333,7 @@ export default function ChecklistRunner() {
   async function handleNext() {
     if (duplicateWarning) {
       const confirmProceed = window.confirm(
-        `Duplicate Location Warning:\n\n${duplicateWarning}\n\nDo you want to proceed with this duplicate location name?`
+        `Duplicate Location Warning:\n\n${duplicateWarning}\n\nDo you want to proceed with this duplicate location name?`,
       );
       if (!confirmProceed) return;
     }
@@ -434,10 +448,13 @@ export default function ChecklistRunner() {
           <div className="mt-2.5 flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm animate-fadeIn">
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
             <div className="flex-1 space-y-0.5">
-              <p className="font-bold text-amber-900">Duplicate Location Name</p>
+              <p className="font-bold text-amber-900">
+                Duplicate Location Name
+              </p>
               <p className="text-amber-800">{duplicateWarning}</p>
               <p className="text-[11px] text-amber-700 mt-0.5">
-                Tip: Each gate or checkpoint should ideally have a unique name so reports do not conflict.
+                Tip: Each gate or checkpoint should ideally have a unique name
+                so reports do not conflict.
               </p>
             </div>
           </div>
